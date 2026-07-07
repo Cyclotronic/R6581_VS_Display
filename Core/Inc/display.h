@@ -51,6 +51,8 @@ void DisplayAnnunciators(void);
 #define Xpos_AUX				280
 #define Xpos_ANNUNC				150
 #define Xpos_SPLASH				330
+#define Ypos_MAIN				0			// start at far left
+#define Ypos_AUX				60
 
 
 #endif // DISPLAY_H
