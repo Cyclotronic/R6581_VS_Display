@@ -534,8 +534,39 @@ void DrawTextChunks(char* text) {
 }
 
 
+// DrawText helper
+void WaitForLT7680Ready(void)
+{
+	uint32_t timeout = 100000;
+	uint8_t status;
+
+	do {
+		status = ReadStatus(); // STSR
+	} while ((status & (1 << 3)) && --timeout);
+}
+
+
+// Draw text with LT7680 busy checking - this version no longer requires delays between DrawText() calls
+void DrawText(const char* text)
+{
+	while (*text != '\0') {
+
+		// Wait until LT7680 core/text engine is idle
+		WaitForLT7680Ready();
+
+		WriteRegister(0x04); // Register for writing text
+		WriteData((uint8_t)*text); // Write each character
+
+		++text;
+	}
+
+	// Wait until final character has completed
+	WaitForLT7680Ready();
+}
+
+
 // Draw text with FIFO checking
-void DrawText(const char* text) {
+void DrawText_old(const char* text) {
     //WriteRegister(0xBA);       // Set the reads to the SPI Master Status Register
     
     while (*text != '\0') {

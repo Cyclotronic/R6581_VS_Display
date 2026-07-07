@@ -85,6 +85,7 @@ uint8_t unmatchedBitmap[FONT_HEIGHT] = { 0 }; // Initialize to zero
 void AdaFruit_Init(void);
 void BuyDisplay_Init(void);
 
+
 //******************************************************************************
 
 // SPI receive buffer for packets data
@@ -638,7 +639,7 @@ int main(void) {
 
 //**************************************************************************************************
 // Main loop initialize
-
+	
 	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
 
 	while (1) {
@@ -688,25 +689,13 @@ int main(void) {
 
 				DisplaySplash();
 
-				//HAL_Delay(6); // Allow the LT7680 sufficient processing time
-				Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
 				DisplayMain();
-
-				//HAL_Delay(6); // Allow the LT7680 sufficient processing time
-				Delay_NonBlocking(6);  // Wait ms in a non-blocking way
 
 				DisplayAux();
 
-				//HAL_Delay(6); // Allow the LT7680 sufficient processing time
-				Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
 				DisplayAnnunciators();
 
-				//HAL_Delay(6); // Allow the LT7680 sufficient processing time
-				Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-				// Right wipe
+				// Right wipe required to erase some random pixels that appear
 				DrawLine(0, 959, 399, 959, 0x00, 0x00, 0x00);	// far right hand vertical line, black, 1 pixel line. (this line hidden!)
 				DrawLine(0, 958, 399, 958, 0x00, 0x00, 0x00);	// (this line hidden!)
 				DrawLine(0, 957, 399, 957, 0x00, 0x00, 0x00);
@@ -1125,7 +1114,6 @@ void Delay_NonBlocking(uint32_t delayMs) {
 		// Do nothing, just wait for time to pass
 	}
 }
-
 
 
 // This function is executed in case of error occurrence.

@@ -11,7 +11,7 @@ VisualGDB/Debug/Core/Src/syscalls.o: Core/Src/syscalls.c \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/_ansi.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/cdefs.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/machine/_default_types.h \
- C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stddef.h \
+ C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stddef.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/reent.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/_types.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/machine/_types.h \
@@ -36,11 +36,11 @@ VisualGDB/Debug/Core/Src/syscalls.o: Core/Src/syscalls.c \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/errno.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/errno.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/stdio.h \
- C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h \
+ C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stdarg.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/stdio.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/signal.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/signal.h \
- C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h \
+ C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stdint.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/stdint.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/_intsup.h \
  C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/time.h \
@@ -58,7 +58,7 @@ C:/SysGCC/arm-eabi/arm-none-eabi/include/time.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/_ansi.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/cdefs.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/machine/_default_types.h:
-C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stddef.h:
+C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stddef.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/reent.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/_types.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/machine/_types.h:
@@ -83,11 +83,11 @@ C:/SysGCC/arm-eabi/arm-none-eabi/include/alloca.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/errno.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/errno.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/stdio.h:
-C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stdarg.h:
+C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stdarg.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/stdio.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/signal.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/signal.h:
-C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/14.2.1/include/stdint.h:
+C:/SysGCC/arm-eabi/lib/gcc/arm-none-eabi/13.3.1/include/stdint.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/stdint.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/_intsup.h:
 C:/SysGCC/arm-eabi/arm-none-eabi/include/sys/time.h:
