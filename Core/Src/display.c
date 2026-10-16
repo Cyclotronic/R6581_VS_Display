@@ -739,3 +739,99 @@ void DisplayCloneDeterminationAux(void)
 
 	DrawText(loopStr);
 }
+
+
+//******************************************************************************
+// GLYPH SELF-TEST (build with -DGLYPH_SELFTEST=1)
+//
+// Runs once at boot, before normal operation. It fills G[] and Annunc[] with test data and calls the
+// real DisplayMain()/DisplayAux()/DisplayAnnunciators(), so it exercises exactly the production
+// drawing path (fonts, sizes, spacing, the $ -> ohm glyph split) without the meter sending anything.
+//
+//  Pages 1-6 : every printable ASCII char 0x20-0x7E (except '$', tested on the ohm pages) on the MAIN and AUX lines
+//  Page  7   : the special codes the font table can return (micro, degree, arrows, diag-mode patterns)
+//  Page  8   : ohm symbol, MAIN and AUX ("$" placeholder), 2W
+//  Page  9   : all 18 annunciators ON
+//  Page 10   : all annunciators OFF + a long worst-case line
+// Each page is held for GLYPH_PAGE_MS. A page label is shown at the splash position.
+//******************************************************************************
+#if GLYPH_SELFTEST
+
+#define GLYPH_PAGE_MS 9000
+
+static void GlyphLabel(int page, int total)
+{
+	char buf[20];
+	snprintf(buf, sizeof(buf), "GLYPH TEST %d/%d", page, total);
+	SetTextColors(0x00FFFF, 0x000000);
+	ConfigureFontAndPosition(
+		0b00, 0b00, 0b00,   // CGROM, 16-dot, ISO 8859-1
+		0, 0, 1,            // alignment off, chroma key off, rotate 90
+		0b00, 0b00, 1, 4,   // X1, X1, line spacing 1, char spacing 4
+		Xpos_SPLASH, 100);
+	DrawText(buf);
+}
+
+static void GlyphPage(const char* main18, const char* aux29, _Bool annOn, int page, int total)
+{
+	int i;
+	for (i = 1; i <= 47; i++) G[i] = ' ';
+	for (i = 0; i < 18 && main18[i]; i++) G[1 + i] = main18[i];
+	for (i = 0; i < 29 && aux29[i]; i++) G[19 + i] = aux29[i];
+	for (i = 1; i <= 18; i++) Annunc[i] = annOn;
+
+	ClearScreen();
+	DisplayMain();
+	DisplayAux();
+	DisplayAnnunciators();
+	GlyphLabel(page, total);
+	Delay_NonBlocking(GLYPH_PAGE_MS);
+}
+
+void GlyphSelfTest(void)
+{
+	// All printable ASCII except '$' (94 chars)
+	char all[96];
+	int n = 0, c;
+	for (c = 0x20; c <= 0x7E; c++) if (c != '$') all[n++] = (char)c;
+	all[n] = '\0';
+
+	const int total = 10;
+	char main18[19], aux29[30];
+	int page;
+
+	for (page = 0; page < 6; page++) {
+		int start = page * 18;
+		memset(main18, ' ', 18); main18[18] = '\0';
+		for (int i = 0; i < 18 && (start + i) < n; i++) main18[i] = all[start + i];
+		// AUX shows the same 18 chars so every char is checked at both sizes
+		memset(aux29, ' ', 29); aux29[29] = '\0';
+		memcpy(aux29, main18, 18);
+		GlyphPage(main18, aux29, 0, page + 1, total);
+	}
+
+	// Page 7: special codes
+	{
+		const unsigned char sp[18] = { 0xB5, 0xB0, 0x10, 0x11, 0x1A, 0x1E, 0x1F, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C, 0x16 };
+		for (int i = 0; i < 18; i++) main18[i] = (char)sp[i];
+		main18[18] = '\0';
+		memset(aux29, ' ', 29); aux29[29] = '\0';
+		memcpy(aux29, main18, 18);
+		GlyphPage(main18, aux29, 0, 7, total);
+	}
+
+	// Page 8: ohm symbol on both lines, in the same forms the meter sends
+	GlyphPage("  1.234567    k$2W", " 10k$ Range  OHM$TEST $       ", 0, 8, total);
+
+	// Page 9: every annunciator ON, with a realistic reading
+	GlyphPage("- 1.234567     VDC", "  10 V Range                 ", 1, 9, total);
+
+	// Page 10: annunciators OFF, worst-case wide line
+	GlyphPage("-123.45678E+00 mVDC", "1000mV Range  STATISTICS    ", 0, 10, total);
+
+	ClearScreen();
+	for (int i = 1; i <= 47; i++) G[i] = ' ';
+	for (int i = 1; i <= 18; i++) Annunc[i] = 0;
+}
+
+#endif // GLYPH_SELFTEST

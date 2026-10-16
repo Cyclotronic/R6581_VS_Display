@@ -46,6 +46,14 @@ void DisplaySplash(void);
 void DisplayAux(void);
 void DisplayAnnunciators(void);
 
+// Glyph self-test: set GLYPH_SELFTEST to 1 (e.g. -DGLYPH_SELFTEST=1) to run it once at boot before normal operation.
+#ifndef GLYPH_SELFTEST
+#define GLYPH_SELFTEST 0
+#endif
+#if GLYPH_SELFTEST
+void GlyphSelfTest(void);
+#endif
+
 // Settings suited for 400x960 TFT LCD (320x960 physical)
 #define Xpos_MAIN				182			// These are actually the Y position on the R6581 because LCD is rotated 90deg in use. Values in pixels.
 #define Xpos_AUX				280

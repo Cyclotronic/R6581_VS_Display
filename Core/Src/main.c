@@ -655,6 +655,10 @@ int main(void) {
 	
 	RunBluePillSpeedTestOffline(); // BluePill speed test
 	ClearScreen(); // Again.....
+
+#if GLYPH_SELFTEST
+	GlyphSelfTest();	// ~90 s of test pages, then normal operation
+#endif
 	
 	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
 
