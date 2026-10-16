@@ -130,6 +130,19 @@ volatile uint8_t SPI1_TX_completed_flag = 1;
 // Flag indicating finish of SPI start-up initialization
 volatile uint8_t Init_Completed_flag = 0;
 
+#ifndef TIMING_PROBE
+#define TIMING_PROBE 0
+#endif
+#if TIMING_PROBE
+// Timing probe (read over SWD): CPU cycle counts (DWT->CYCCNT); divide by SystemCoreClock for seconds.
+volatile uint32_t tp_draw_last, tp_draw_min = 0xFFFFFFFF, tp_draw_max;   // DisplaySplash..right-edge wipe
+volatile uint32_t tp_total_last, tp_total_max;                           // whole timed block incl. settle + button read
+volatile uint32_t tp_period_last, tp_period_min = 0xFFFFFFFF, tp_period_max;  // entry-to-entry period of the timed block
+volatile uint32_t tp_blocks;                                             // number of timed blocks run
+volatile uint32_t tp_main_loops;                                         // passes of the main while(1)
+static uint32_t tp_prev_entry;
+#endif
+
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 
@@ -308,6 +321,7 @@ const BitmapChar bitmap_characters[] = {
 	{{0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11}, 'x' },     // 0x78, x
 	{{0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E}, '[' },     // 0x5B, [
 	{{0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E}, ']' },     // 0x5D, ]
+	{{0x07, 0x08, 0x0E, 0x11, 0x11, 0x12, 0x0C}, '\x7F'},    // lowercase sigma (statistics screen); drawn as a custom glyph, see display.c
 };
 
 
@@ -656,10 +670,17 @@ int main(void) {
 	RunBluePillSpeedTestOffline(); // BluePill speed test
 	ClearScreen(); // Again.....
 
+	LoadCustomGlyphs_LT();			// ohm + sigma glyphs, loaded once (and again after DISPLAY OFF)
+
 #if GLYPH_SELFTEST
 	GlyphSelfTest();	// ~90 s of test pages, then normal operation
 #endif
 	
+#if TIMING_PROBE
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	DWT->CYCCNT = 0;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+#endif
 	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
 
 	while (1) {
@@ -673,6 +694,9 @@ int main(void) {
 		DMA1_Channel3->CCR &= ~DMA_CCR_EN;				// Disable the TFT SPI DMA channels
 		NVIC_DisableIRQ(SPI1_IRQn);						// Disable TFT SPI NVIC interrupts to prevent any inadvertent triggering
 
+#if TIMING_PROBE
+		tp_main_loops++;
+#endif
 		Packets_to_chars();         // Convert VFD packets from R6581 to characters
 		Main_Aux_R6581();           // Get R6581 VFD drive data
 
@@ -706,6 +730,11 @@ int main(void) {
 				NVIC_DisableIRQ(DMA1_Channel5_IRQn);
 
 				HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin); // Test LED toggle
+#if TIMING_PROBE
+				uint32_t tp_t0 = DWT->CYCCNT;
+				if (tp_blocks) { tp_period_last = tp_t0 - tp_prev_entry; if (tp_period_last < tp_period_min) tp_period_min = tp_period_last; if (tp_period_last > tp_period_max) tp_period_max = tp_period_last; }
+				tp_prev_entry = tp_t0;
+#endif
 
 				DisplaySplash();
 
@@ -724,6 +753,9 @@ int main(void) {
 				DrawLine(0, 954, 399, 954, 0x00, 0x00, 0x00);
 				DrawLine(0, 953, 399, 953, 0x00, 0x00, 0x00);
 				DrawLine(0, 952, 399, 952, 0x00, 0x00, 0x00);
+#if TIMING_PROBE
+				tp_draw_last = DWT->CYCCNT - tp_t0; if (tp_draw_last < tp_draw_min) tp_draw_min = tp_draw_last; if (tp_draw_last > tp_draw_max) tp_draw_max = tp_draw_last;
+#endif
 
 				// Test only - 400pixel based test lines for viewing the centre line and the left, middle and far right positions.
 				// The internal memory is set up as 400x960 but the leftmost 80 pixels are considered overscan and don't show up, thus 320
@@ -757,6 +789,9 @@ int main(void) {
 				// Wait until SPI1 finishes any ongoing transactions
 				while (SPI1->SR & SPI_SR_BSY);
 
+#if TIMING_PROBE
+				tp_total_last = DWT->CYCCNT - tp_t0; if (tp_total_last > tp_total_max) tp_total_max = tp_total_last; tp_blocks++;
+#endif
 				// Resume SPI2 capture:
 				// Re-enable DMA channels first
 				DMA1_Channel4->CCR |= DMA_CCR_EN;
