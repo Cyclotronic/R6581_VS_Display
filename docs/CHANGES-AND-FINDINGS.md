@@ -20,6 +20,33 @@ tested on an R6581T with the original VFD-to-TFT hardware (STM32F103C8 "Blue Pil
 | 10 | Build options: `BOOT_DIAG_SHOWS`, `BOOT_SCREEN_MS`, `SPLASH_IN_LOOP`, `ONE_VOLT_MODE`, `GLYPH_SELFTEST`, `TIMING_PROBE` | Every behaviour change can be undone at build time | All default to the behaviour described above |
 | 11 | Build script for the Arm GNU Toolchain (no VisualGDB) | GCC 14 treats Ian's one implicit declaration as an error; the script downgrades it instead of editing his source | [BENCH-TOOLS.md](BENCH-TOOLS.md) |
 
+## Test editions (ready-to-flash builds)
+
+| Folder | Built from | Optimisation | What it adds | Notes |
+| --- | --- | --- | --- | --- |
+| Ian's original | `VisualGDB/Debug/R6581_VS_Display.hex` | `-O0` | the baseline | the revert target |
+| [`Prebuilt/hydron-test-2026-10-16/`](../Prebuilt/hydron-test-2026-10-16/) | `3902c78` | `-O0` | changes 1 to 5 (sigma, loaded-once glyphs, central routine, red ERROR, larger annunciators); splash numbers moved off the annunciator row | first build for Hydron; its README lists the checks asked of him |
+| [`Prebuilt/hydron-test-2026-10-17/`](../Prebuilt/hydron-test-2026-10-17/) | `b358880` | `-O0` | change 6 (layout table, Hydron sizes, 8 px gaps) and change 7 in its first form (boot diagnostics for the first 10 boots) | |
+| [`Prebuilt/test-2026-10-17-O2-bootscreen/`](../Prebuilt/test-2026-10-17-O2-bootscreen/) | `5339ab5` | `-O2` | the centred boot screen with Ian's character (7), 1 V mode off (8), `-O2` (9) | the current test build |
+
+Each folder has its own README with the flash and restore commands, checksums, and what to check. Take a backup of the 64 KB flash first and never do a full chip erase (the last 1 KB holds the TFT timing settings and the boot counter).
+
+## Experiments and where their results are
+
+| Experiment | Outcome | Where |
+| --- | --- | --- |
+| Timing probe (`-DTIMING_PROBE=1`) at `-O0`, `-O2`, `-Os` | redraw 25 / 18.4 / 19.5 ms; `-O2` adopted for the latest build | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md), `tools/measure.py` |
+| Ohm redraw before and after loading glyphs once | 45.3 ms to 26.1 ms | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) |
+| LT7680 page flip (VSYNC, `REG[20h-23h]`) | works, no visible benefit; not merged | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md), `tools/events240.py` |
+| Layout options and the taller main line | shipped layout in [LAYOUT.md](LAYOUT.md); taller line rejected (tick limit, lens interference) | [LAYOUT.md](LAYOUT.md), `images/layout_*.png`, `tools/layout_diagram.py` |
+| Boot screen design | centred, inside X 128 to 352 | [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md), `images/boot_screen.png`, `tools/boot_screen_mockup.py`, `tools/make_logo.py` |
+| Ian's 1 V mode | works, off by default | [ONE-VOLT-MODE.md](ONE-VOLT-MODE.md) |
+| Menu walk for decode gaps | no persistent unmatched glyph; sigma found | [BENCH-TOOLS.md](BENCH-TOOLS.md), `tools/menu_logger.py`, `tools/swd.py` |
+| Sigma bitmap | generated, drawn as a user-defined glyph | `tools/make_sigma.py` |
+| Building without VisualGDB | GCC 14 note, build options | `tools/build.sh`, [BENCH-TOOLS.md](BENCH-TOOLS.md) |
+
+The raw captures (photos, videos, logs) are not in this repository; the numbers and conclusions above are.
+
 ## Findings that were resolved
 
 - **Missing sigma** on the statistics screen: found by walking the front-panel menus with a logger (CONFIGURE > MATH > STATISTICS > READ, then the arrow keys). Fixed by change 1.
