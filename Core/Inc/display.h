@@ -62,8 +62,8 @@ void GlyphSelfTest(void);
 
 // Settings suited for 400x960 TFT LCD (320x960 physical)
 #define Xpos_MAIN				184			// X = vertical position on the screen (the panel is rotated 90 deg); main line, 48x96 px cells
-#define Xpos_AUX				296			// aux line, 32x64 px cells (32-dot font drawn x2)
-#define Xpos_ANNUNC				120			// annunciator row, 12x48 px
+#define Xpos_AUX				288			// aux line, 32x64 px cells (32-dot font drawn x2)
+#define Xpos_ANNUNC				128			// annunciator row, 12x48 px
 #define Spacing_MAIN			5			// main line character spacing: pitch = 16 * 3 + 5 = 53
 #define Spacing_AUX				1			// aux line character spacing: pitch = 16 * 2 + 1 = 33
 #define Ypos_ANNUC				2			// first label starts 2 px in; the last (SRQ) ends at ~953 of 960

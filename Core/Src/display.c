@@ -788,8 +788,8 @@ void GlyphSelfTest(void)
 //******************************************************************************
 // Boot screen: shown at boot for the first few boots, before the live display starts, so nothing else is being drawn.
 // Layout: speed line (aux size) from DisplayCloneDeterminationAux; credit and timing lines below it in the 16-dot font.
-#define BOOT_CREDIT_X    352   // 16-dot lines under the speed line (aux row 296..344 at boot): 352..368 and 374..390
-#define BOOT_SETTINGS_X  374
+#define BOOT_CREDIT_X    360   // 16-dot lines under the speed line (aux row 296..344 at boot): 352..368 and 374..390
+#define BOOT_SETTINGS_X  382
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 {
 	ClearScreen();
