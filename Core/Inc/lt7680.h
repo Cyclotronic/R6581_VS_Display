@@ -192,10 +192,9 @@ void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage);
 #endif
 
 // ---- Custom (user-defined) glyphs: ohm = code 0, sigma = code 1 --------------------------------------------
-// Each size has its own glyph region in SDRAM, away from the display buffer (page 0 = 0x000000..0x0BB7FF), so
+// The glyph set lives in its own region of SDRAM, away from the display buffer (page 0 = 0x000000..0x0BB7FF), so
 // ordinary drawing can never overwrite them and they only need loading once (boot, and again after DISPLAY OFF).
-#define CGRAM_BASE_MAIN   0x00200000UL   // 16x32 glyphs, 64 bytes each  (main line)
-#define CGRAM_BASE_AUX    0x00201000UL   // 12x24 glyphs, 48 bytes each  (aux line)
+#define CGRAM_BASE_MAIN   0x00200000UL   // 16x32 glyphs, 64 bytes each (main line, and the aux line drawn at 2x)
 #define GLYPH_CODE_OHM    0
 #define GLYPH_CODE_SIGMA  1
 void SetCGRAMStart_LT(uint32_t addr);          // REG[DBh-DEh]: where user-defined glyph code 0 lives

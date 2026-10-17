@@ -52,8 +52,9 @@ typedef struct {
 	uint32_t cgram;      // glyph region for this size
 } LineFmt;
 
-static const LineFmt LineFmtMain = { 0b10, 0b10, 4, 16 * 3 + 4, Xpos_MAIN, Ypos_MAIN, CGRAM_BASE_MAIN };
-static const LineFmt LineFmtAux  = { 0b01, 0b01, 0, 12 * 2,     Xpos_AUX,  Ypos_AUX,  CGRAM_BASE_AUX  };
+static const LineFmt LineFmtMain = { 0b10, 0b10, Spacing_MAIN, 16 * 3 + Spacing_MAIN, Xpos_MAIN, Ypos_MAIN, CGRAM_BASE_MAIN };
+// The aux line uses the 32-dot font drawn x2 (32x64 px cells), so it draws its glyphs from the same 16x32 set as the main line.
+static const LineFmt LineFmtAux  = { 0b10, 0b01, Spacing_AUX,  16 * 2 + Spacing_AUX,  Xpos_AUX,  Ypos_AUX,  CGRAM_BASE_MAIN };
 
 static int GlyphCodeFor(char c)
 {
@@ -271,9 +272,9 @@ void DisplayMain() {
 				0b10,    // Width multiplier
 				0b10,    // Height multiplier
 				1,       // Line spacing
-				4,       // Character spacing
-				Xpos_MAIN,      // Cursor X
-				0        // Cursor Y
+				LineFmtMain.spacing,   // Character spacing
+				LineFmtMain.x,         // Cursor X
+				LineFmtMain.y0         // Cursor Y
 			);
 			DrawText(MaindisplayString);
 
@@ -291,9 +292,9 @@ void DisplayMain() {
 				0b10,    // Width multiplier
 				0b10,    // Height multiplier
 				1,       // Line spacing
-				4,       // Character spacing
-				Xpos_MAIN,      // Cursor X
-				0        // Cursor Y
+				LineFmtMain.spacing,   // Character spacing
+				LineFmtMain.x,         // Cursor X
+				LineFmtMain.y0         // Cursor Y
 			);
 			char MaindisplayString[19] = "";              // String for G[1] to G[18]
 			for (int i = 1; i <= 18; i++) {
@@ -374,7 +375,7 @@ void DisplayAux() {
 	}
 
 	uint16_t yposohm = 0; // Initialize y-position for OHM symbol
-	uint16_t yposoffset = 60; // Initialize y-position for OHM symbol
+	uint16_t yposoffset = Ypos_AUX; // Initialize y-position for OHM symbol
 
 	int auxHasGlyph = HasGlyph(AuxdisplayString, 29);
 
@@ -408,24 +409,24 @@ void DisplayAux() {
 
 		// If in 1000mV range and user has enabled the new 1VDC mode
 		if (oneVoltmode && onethousandmVmodedetected) {
-			yposohm = 60;
+			yposohm = Ypos_AUX;
 		}
 		else {
-			yposohm = 60;
+			yposohm = Ypos_AUX;
 		}
 
 		ConfigureFontAndPosition(
 			0b00,    // Internal CGROM
-			0b01,    // Font size
+			LineFmtAux.height,    // Font size: 32-dot, drawn x2
 			0b00,    // ISO 8859-1
 			0,       // Full alignment enabled
 			0,       // Chroma keying disabled
 			1,       // Rotate 90 degrees counterclockwise
-			0b01,    // Width multiplier
-			0b01,    // Height multiplier
+			LineFmtAux.mult,    // Width multiplier
+			LineFmtAux.mult,    // Height multiplier
 			5,       // Line spacing
-			0,       // Character spacing
-			Xpos_AUX,     // Cursor X
+			LineFmtAux.spacing,       // Character spacing
+			LineFmtAux.x,     // Cursor X
 			yposohm       // Cursor Y
 		);
 
@@ -787,6 +788,8 @@ void GlyphSelfTest(void)
 //******************************************************************************
 // Boot screen: shown at boot for the first few boots, before the live display starts, so nothing else is being drawn.
 // Layout: speed line (aux size) from DisplayCloneDeterminationAux; credit and timing lines below it in the 16-dot font.
+#define BOOT_CREDIT_X    352   // 16-dot lines under the speed line (aux row 296..344 at boot): 352..368 and 374..390
+#define BOOT_SETTINGS_X  374
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 {
 	ClearScreen();
@@ -797,7 +800,7 @@ void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 		0b00, 0b00, 0b00,   // built-in font, 16-dot, ISO 8859-1
 		0, 0, 1,            // alignment off, chroma key off, rotate 90
 		0b00, 0b00, 1, 4,   // X1, X1, line spacing 1, char spacing 4
-		Xpos_SPLASH + 20, 100);
+		BOOT_CREDIT_X, 100);
 	DrawText("Reverse engineering by By MickleT / TFT LCD by Ian Johnston");
 
 	char line[112];
@@ -809,6 +812,6 @@ void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 		0b00, 0b00, 0b00,
 		0, 0, 1,
 		0b00, 0b00, 1, 4,
-		Xpos_SPLASH + 42, 100);
+		BOOT_SETTINGS_X, 100);
 	DrawText(line);
 }

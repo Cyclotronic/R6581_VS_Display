@@ -61,13 +61,15 @@ void GlyphSelfTest(void);
 #endif
 
 // Settings suited for 400x960 TFT LCD (320x960 physical)
-#define Xpos_MAIN				182			// These are actually the Y position on the R6581 because LCD is rotated 90deg in use. Values in pixels.
-#define Xpos_AUX				280
-#define Xpos_ANNUNC				126			// annunciator row (24-dot font, 48 px tall) sits just above the main line at 182
+#define Xpos_MAIN				184			// X = vertical position on the screen (the panel is rotated 90 deg); main line, 48x96 px cells
+#define Xpos_AUX				296			// aux line, 32x64 px cells (32-dot font drawn x2)
+#define Xpos_ANNUNC				120			// annunciator row, 12x48 px
+#define Spacing_MAIN			5			// main line character spacing: pitch = 16 * 3 + 5 = 53
+#define Spacing_AUX				1			// aux line character spacing: pitch = 16 * 2 + 1 = 33
 #define Ypos_ANNUC				2			// first label starts 2 px in; the last (SRQ) ends at ~953 of 960
-#define Xpos_SPLASH				330
-#define Ypos_MAIN				0			// start at far left
-#define Ypos_AUX				60
+#define Xpos_SPLASH				376			// small text below the aux row (self-test label)
+#define Ypos_MAIN				3			// first main cell starts 3 px in
+#define Ypos_AUX				0			// aux line starts flush left
 
 
 #endif // DISPLAY_H
