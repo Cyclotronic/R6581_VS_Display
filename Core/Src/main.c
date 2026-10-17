@@ -48,8 +48,12 @@ _Bool oneVoltmodepreviousState = false;
 
 // Boot diagnostics (BluePill speed test + splash screen): shown for the first BOOT_DIAG_SHOWS boots only.
 // Holding DCV at power-up resets the count. The count lives in spare words of the settings page (see BootCountRead).
-#define BOOT_DIAG_SHOWS      10
+#ifndef BOOT_DIAG_SHOWS
+#define BOOT_DIAG_SHOWS      10         // 0 = never; 255 = every boot (-DBOOT_DIAG_SHOWS=255)
+#endif
+#ifndef BOOT_SCREEN_MS
 #define BOOT_SCREEN_MS       4000       // how long the boot screen stays up
+#endif
 #define BOOT_MARKER_OFFSET   64         // byte offset in the settings page of the boot markers (settings use 0..31)
 #define BOOT_MARKER_WORDS    16         // markers available; counting stops at BOOT_DIAG_SHOWS anyway
 uint8_t boot_diag_number = 0;           // 1-based number of the boot being shown (0 = not shown)

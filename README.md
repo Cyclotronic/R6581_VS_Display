@@ -15,3 +15,7 @@ NOTES:
 1. Function prototypes in the headers are missing, I couldn't be bothered! VS2022 seems to compile just fine and produce working code without them.
 
 Ian.
+
+NOTE (this fork): bench-test notes, timing experiments, the boot-screen change and the tools used are in docs/README.md.
+Ready-to-flash builds are in Prebuilt/.
+
