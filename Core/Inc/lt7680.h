@@ -200,3 +200,5 @@ void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage);
 void SetCGRAMStart_LT(uint32_t addr);          // REG[DBh-DEh]: where user-defined glyph code 0 lives
 void LoadCustomGlyphs_LT(void);                // write the glyph sets into both regions
 void WaitForLT7680Ready(void);
+void DrawBootLogo_LT(uint16_t x0, uint16_t y0, uint16_t rgb565);
+uint16_t BootLogoWidth_LT(void);   // boot screen: Ian's character, white 1-bit bitmap at memory X/Y

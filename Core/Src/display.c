@@ -787,31 +787,57 @@ void GlyphSelfTest(void)
 
 //******************************************************************************
 // Boot screen: shown at boot for the first few boots, before the live display starts, so nothing else is being drawn.
-// Layout: speed line (aux size) from DisplayCloneDeterminationAux; credit and timing lines below it in the 16-dot font.
-#define BOOT_CREDIT_X    360   // 16-dot lines under the speed line (aux row 296..344 at boot): 352..368 and 374..390
-#define BOOT_SETTINGS_X  382
+// It stays inside the live layout's visible band, X 128 (top of the annunciators) to 352 (bottom of the aux row), and is centred
+// across the visible width (Y 0..951; the right-edge wipe covers 952..959). Rows, top to bottom (X = screen row):
+//   speed line (grey, 24-dot) | two notes (white, 32-dot): the screen only appears for the first boots, hold DCV to bring it back |
+//   timing numbers + boot n/N (grey, 24-dot) | credits (green, 24-dot) with Ian's character (same green, 48 px tall) to their right.
+#define BOOT_SPEED_ROW_X    128
+#define BOOT_NOTE1_ROW_X    176
+#define BOOT_NOTE2_ROW_X    214
+#define BOOT_SETTINGS_ROW_X 266
+#define BOOT_LOGO_ROW_X     304   // even, so the logo's canvas start is 4-byte aligned; rows 304..351
+#define BOOT_CREDIT_ROW_X   316   // 24-dot line centred on the logo
+#define BOOT_VISIBLE_Y      952
+#define BOOT_CREDIT_GAP     16    // between the credits and the logo
+#define BOOT_GREEN          0x00FF00
+#define BOOT_GREEN_565      0x07E0
+
+// One line of text: height code 0b00/01/10 = 16/24/32-dot font; y == 0xFFFF centres it across the visible width.
+static void BootLine(const char* s, uint8_t heightCode, uint16_t cellW, uint16_t x, uint16_t y, uint32_t colour)
+{
+	uint16_t w = (uint16_t)(strlen(s) * cellW);
+	if (y == 0xFFFF) y = (w < BOOT_VISIBLE_Y) ? (BOOT_VISIBLE_Y - w) / 2 : 0;
+	SetTextColors(colour, 0x000000);
+	ConfigureFontAndPosition(
+		0b00, heightCode, 0b00,   // built-in font, size, ISO 8859-1
+		0, 0, 1,                  // alignment off, chroma key off, rotate 90
+		0b00, 0b00, 1, 0,         // x1, x1, line spacing 1, char spacing 0
+		x, y);
+	DrawText(s);
+}
+
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 {
+	char line[96];
+	static const char credits[] = "Reverse engineering by MickleT / TFT LCD by Ian Johnston";
+
 	ClearScreen();
-	DisplayCloneDeterminationAux();    // "BluePill speed = N"
 
-	SetTextColors(0x00FF00, 0x000000);
-	ConfigureFontAndPosition(
-		0b00, 0b00, 0b00,   // built-in font, 16-dot, ISO 8859-1
-		0, 0, 1,            // alignment off, chroma key off, rotate 90
-		0b00, 0b00, 1, 4,   // X1, X1, line spacing 1, char spacing 4
-		BOOT_CREDIT_X, 100);
-	DrawText("Reverse engineering by By MickleT / TFT LCD by Ian Johnston");
+	snprintf(line, sizeof(line), "BluePill speed = %lu", dbg_loop_per_sec);
+	BootLine(line, 0b01, 12, BOOT_SPEED_ROW_X, 0xFFFF, AuxColourForeLS);
 
-	char line[112];
-	snprintf(line, sizeof(line), "%d %d %d %d %d %d %d %s   boot %d/%d - hold DCV at power-up to repeat",
+	snprintf(line, sizeof(line), "Splash + timing test: first %d boots only", (int)of);
+	BootLine(line, 0b10, 16, BOOT_NOTE1_ROW_X, 0xFFFF, 0xFFFFFF);
+	BootLine("After that, hold DCV at power-up to reset", 0b10, 16, BOOT_NOTE2_ROW_X, 0xFFFF, 0xFFFFFF);
+
+	snprintf(line, sizeof(line), "%d %d %d %d %d %d %d %s   boot %d/%d",
 		(int)LCD_VBPD, (int)LCD_VFPD, (int)LCD_VSPW, (int)LCD_HBPD, (int)LCD_HFPD, (int)LCD_HSPW, (int)REFRESH_RATE, ADA_BUY,
 		(int)bootNumber, (int)of);
-	SetTextColors(0x909090, 0x000000);
-	ConfigureFontAndPosition(
-		0b00, 0b00, 0b00,
-		0, 0, 1,
-		0b00, 0b00, 1, 4,
-		BOOT_SETTINGS_X, 100);
-	DrawText(line);
+	BootLine(line, 0b01, 12, BOOT_SETTINGS_ROW_X, 0xFFFF, 0x909090);
+
+	// credits and the logo as one centred group
+	uint16_t cw = (uint16_t)(sizeof(credits) - 1) * 12;
+	uint16_t y0 = (BOOT_VISIBLE_Y - (cw + BOOT_CREDIT_GAP + BootLogoWidth_LT())) / 2;
+	BootLine(credits, 0b01, 12, BOOT_CREDIT_ROW_X, y0, BOOT_GREEN);
+	DrawBootLogo_LT(BOOT_LOGO_ROW_X, y0 + cw + BOOT_CREDIT_GAP, BOOT_GREEN_565);
 }

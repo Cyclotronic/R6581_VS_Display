@@ -1529,3 +1529,38 @@ void LoadCustomGlyphs_LT(void) {
     WaitForLT7680Ready();
     cgram_start_cached = 0xFFFFFFFFUL;                 // force the next draw to set the start address
 }
+
+//**************************************************************************************************
+// Boot logo: a 1-bit bitmap (boot_logo.h) drawn in one colour on black into the visible page.
+// Screen column -> memory Y, screen row -> memory X (the panel is rotated 90 degrees). The canvas start address is moved to the
+// bitmap's top-left corner and the active window set to the bitmap's size, so the pixel stream through REG[04h] fills exactly it.
+#include "boot_logo.h"
+uint16_t BootLogoWidth_LT(void) { return BOOT_LOGO_W; }
+
+void DrawBootLogo_LT(uint16_t x0, uint16_t y0, uint16_t rgb565) {   // top-left at memory X = x0 (even), Y = y0
+    uint32_t a = ((uint32_t)y0 * LCD_XSIZE_TFT + x0) * 2u;   // 16 bpp; x0 must be even so the start is 4-byte aligned
+    uint16_t r, c;
+
+    Graphics_Mode();
+    SetCanvasStart32_LT(a);
+    WriteRegister(0x56); WriteData(0x00); WriteRegister(0x57); WriteData(0x00);               // window upper-left = canvas start
+    WriteRegister(0x58); WriteData(0x00); WriteRegister(0x59); WriteData(0x00);
+    WriteRegister(0x5A); WriteData(BOOT_LOGO_H & 0xFF); WriteRegister(0x5B); WriteData(BOOT_LOGO_H >> 8);   // width  (memory X) = bitmap height
+    WriteRegister(0x5C); WriteData(BOOT_LOGO_W & 0xFF); WriteRegister(0x5D); WriteData(BOOT_LOGO_W >> 8);   // height (memory Y) = bitmap width
+    ResetGraphicWritePosition_LT();
+    SetGraphicRWYCoordinate_LT();
+    for (c = 0; c < BOOT_LOGO_W; c++) {
+        for (r = 0; r < BOOT_LOGO_H; r++) {
+            uint8_t on = (boot_logo[r * BOOT_LOGO_BPR + (c >> 3)] >> (7 - (c & 7))) & 1;
+            uint16_t px = on ? rgb565 : 0x0000;
+            WriteRegister(0x04); WriteData(px & 0xFF);       // low byte first (to be confirmed on the panel)
+            WriteRegister(0x04); WriteData(px >> 8);
+        }
+    }
+    SetCanvasStart32_LT(0x00000000UL);                       // back to the visible page and the full-screen window
+    ConfigureActiveDisplayArea_LT();
+    ResetGraphicWritePosition_LT();
+    SetGraphicRWYCoordinate_LT();
+    Text_Mode();
+    WaitForLT7680Ready();
+}
