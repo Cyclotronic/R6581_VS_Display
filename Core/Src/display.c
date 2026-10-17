@@ -448,7 +448,7 @@ void DisplayAnnunciators() {
 	// ANNUNCIATORS - Print or clear text on the LCD
 	const char* AnnuncNames[19] = {
 		"SMPL", "IDLE", "AUTO", "LOP", "NULL", "DFILT", "MATH", "AZERO",
-		"ERR", "INFO", "FRONT", "REAR", "SLOT", "LO_G", "RMT", "TLK",
+		"ERROR", "INFO", "FRONT", "REAR", "SLOT", "LO_G", "RMT", "TLK",   // ERR is shown as ERROR (5 x 8 px = 40 px, fits the 52 px slot)
 		"LTN", "SRQ"
 	};
 
@@ -478,7 +478,7 @@ void DisplayAnnunciators() {
 
 	for (int i = 0; i < 18; i++) {
 		if (Annunc[i + 1] == 1) {  // Turn the annunciator ON
-			SetTextColors(AnnunColourFore, 0x000000); // Foreground: Green, Background: Black
+			SetTextColors((i == 8) ? 0xFF0000 : AnnunColourFore, 0x000000); // Foreground: the annunciator colour (ERROR in red), Background: Black
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
 				0b00,    // 16-dot font size
