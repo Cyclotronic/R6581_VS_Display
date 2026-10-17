@@ -524,6 +524,9 @@ void DisplayAnnunciators() {
 //******************************************************************************
 
 void DisplaySplash() {
+#if !SPLASH_IN_LOOP
+	return;   // the splash now runs once at boot (DisplayBootScreen), not inside the live loop
+#endif
 
 	// Splash text to display
 	static uint32_t cycle_count = 0; // Persistent counter for cycles
@@ -779,3 +782,33 @@ void GlyphSelfTest(void)
 }
 
 #endif // GLYPH_SELFTEST
+
+
+//******************************************************************************
+// Boot screen: shown at boot for the first few boots, before the live display starts, so nothing else is being drawn.
+// Layout: speed line (aux size) from DisplayCloneDeterminationAux; credit and timing lines below it in the 16-dot font.
+void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
+{
+	ClearScreen();
+	DisplayCloneDeterminationAux();    // "BluePill speed = N"
+
+	SetTextColors(0x00FF00, 0x000000);
+	ConfigureFontAndPosition(
+		0b00, 0b00, 0b00,   // built-in font, 16-dot, ISO 8859-1
+		0, 0, 1,            // alignment off, chroma key off, rotate 90
+		0b00, 0b00, 1, 4,   // X1, X1, line spacing 1, char spacing 4
+		Xpos_SPLASH + 20, 100);
+	DrawText("Reverse engineering by By MickleT / TFT LCD by Ian Johnston");
+
+	char line[112];
+	snprintf(line, sizeof(line), "%d %d %d %d %d %d %d %s   boot %d/%d - hold DCV at power-up to repeat",
+		(int)LCD_VBPD, (int)LCD_VFPD, (int)LCD_VSPW, (int)LCD_HBPD, (int)LCD_HFPD, (int)LCD_HSPW, (int)REFRESH_RATE, ADA_BUY,
+		(int)bootNumber, (int)of);
+	SetTextColors(0x909090, 0x000000);
+	ConfigureFontAndPosition(
+		0b00, 0b00, 0b00,
+		0, 0, 1,
+		0b00, 0b00, 1, 4,
+		Xpos_SPLASH + 42, 100);
+	DrawText(line);
+}

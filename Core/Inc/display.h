@@ -43,6 +43,12 @@ void DisplayAuxSecondHalf(void);
 void DisplayAnnunciatorsHalf(void);
 
 void DisplaySplash(void);
+void DisplayBootScreen(uint8_t bootNumber, uint8_t of);   // boot-time diagnostics screen (speed, credits, timing settings)
+
+// SPLASH_IN_LOOP=1 brings back Ian's splash drawn inside the live loop (it overlaps the live display); default 0 = boot screen only
+#ifndef SPLASH_IN_LOOP
+#define SPLASH_IN_LOOP 0
+#endif
 void DisplayAux(void);
 void DisplayAnnunciators(void);
 

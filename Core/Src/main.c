@@ -46,6 +46,23 @@ _Bool oneVoltmodepreviousState = false;
 #define EEPROM_START_ADDRESS 0x0800FC00 // Last page for 64KB Flash
 #define EEPROM_PAGE_SIZE     1024       // Page size in bytes
 
+// Boot diagnostics (BluePill speed test + splash screen): shown for the first BOOT_DIAG_SHOWS boots only.
+// Holding DCV at power-up resets the count. The count lives in spare words of the settings page (see BootCountRead).
+#define BOOT_DIAG_SHOWS      10
+#define BOOT_SCREEN_MS       4000       // how long the boot screen stays up
+#define BOOT_MARKER_OFFSET   64         // byte offset in the settings page of the boot markers (settings use 0..31)
+#define BOOT_MARKER_WORDS    16         // markers available; counting stops at BOOT_DIAG_SHOWS anyway
+uint8_t boot_diag_number = 0;           // 1-based number of the boot being shown (0 = not shown)
+
+HAL_StatusTypeDef EEPROM_WriteData(uint32_t address, uint32_t data);
+HAL_StatusTypeDef EEPROM_Write4CharString(uint32_t address, const char* str);
+HAL_StatusTypeDef EEPROM_ErasePage(uint32_t address);
+uint32_t EEPROM_ReadData(uint32_t address);
+void EEPROM_Read4CharString(uint32_t address, char* buffer);
+static uint8_t BootCountRead(void);
+static void BootCountIncrement(uint8_t count);
+static void BootCountReset(void);
+
 // TFT timing vars
 _Bool timingModsOnBoot = false;
 _Bool timingModsOnBootDCV = false;
@@ -667,7 +684,20 @@ int main(void) {
 //**************************************************************************************************
 // Main loop initialize
 	
-	RunBluePillSpeedTestOffline(); // BluePill speed test
+	// Boot diagnostics: the BluePill speed test and the splash screen, one boot screen before the live display starts.
+	// Only for the first BOOT_DIAG_SHOWS boots; holding DCV at power-up resets the count so they come back.
+	{
+		uint8_t boots = BootCountRead();
+		if (timingModsOnBoot) {          // DCV held at power-up
+			BootCountReset();            // also leaves the TFT timing settings exactly as loaded
+			boots = 0;
+		}
+		if (boots < BOOT_DIAG_SHOWS) {
+			BootCountIncrement(boots);
+			boot_diag_number = boots + 1;
+			RunBluePillSpeedTestOffline(); // measures, shows the boot screen for BOOT_SCREEN_MS, then clears it
+		}
+	}
 	ClearScreen(); // Again.....
 
 	LoadCustomGlyphs_LT();			// ohm + sigma glyphs, loaded once (and again after DISPLAY OFF)
@@ -1073,9 +1103,9 @@ void RunBluePillSpeedTestOffline(void)
 	dbg_loop_per_sec = dbg_loop_count;
 	dbg_loop_test_done = 1;
 
-	DisplayCloneDeterminationAux();
+	DisplayBootScreen(boot_diag_number, BOOT_DIAG_SHOWS);   // speed result + credits + timing settings + boot n/N
 
-	HAL_Delay(2000);
+	HAL_Delay(BOOT_SCREEN_MS);
 }
 
 
@@ -1240,3 +1270,38 @@ void assert_failed(uint8_t* file, uint32_t line)
 	   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
+
+//**************************************************************************************************
+// Boot counter in the settings page
+//
+// Flash bits can be cleared without erasing the page, so each boot programs the next unused (0xFFFFFFFF) marker word to 0.
+// The count is the number of programmed markers. Anything that erases the settings page (timing mode, first-boot defaults,
+// the DCV-held reset below) also clears the markers, which restarts the count.
+
+static uint8_t BootCountRead(void) {
+	uint8_t n = 0;
+	for (uint8_t i = 0; i < BOOT_MARKER_WORDS; i++) {
+		if (EEPROM_ReadData(EEPROM_START_ADDRESS + BOOT_MARKER_OFFSET + 4u * i) == 0xFFFFFFFFu) break;
+		n++;
+	}
+	return n;
+}
+
+static void BootCountIncrement(uint8_t count) {
+	if (count < BOOT_MARKER_WORDS)
+		EEPROM_WriteData(EEPROM_START_ADDRESS + BOOT_MARKER_OFFSET + 4u * count, 0x00000000u);
+}
+
+// Erase the page and write the current TFT timing settings straight back, which clears the markers.
+static void BootCountReset(void) {
+	EEPROM_ErasePage(EEPROM_START_ADDRESS);
+	EEPROM_WriteData(EEPROM_START_ADDRESS, setting_LCD_VBPD);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 4, setting_LCD_VFPD);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 8, setting_LCD_VSPW);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 12, setting_LCD_HBPD);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 16, setting_LCD_HFPD);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 20, setting_LCD_HSPW);
+	EEPROM_WriteData(EEPROM_START_ADDRESS + 24, setting_REFRESH_RATE);
+	EEPROM_Write4CharString(EEPROM_START_ADDRESS + 28, setting_ADA_BUY);
+}
