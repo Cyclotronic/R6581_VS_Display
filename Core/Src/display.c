@@ -44,7 +44,8 @@ static void CheckDisplayStatus(void);
 
 typedef struct {
 	uint8_t  height;     // font height code: 0b01 = 24-dot, 0b10 = 32-dot
-	uint8_t  mult;       // width/height multiplier code
+	uint8_t  wmult;      // width multiplier code (0b00 = x1 ... 0b11 = x4)
+	uint8_t  hmult;      // height multiplier code
 	uint8_t  spacing;    // character spacing
 	uint16_t pitch;      // pixels per character cell along the line (glyph width * multiplier + spacing)
 	uint16_t x;          // cursor X (the line's position across the rotated display)
@@ -52,9 +53,10 @@ typedef struct {
 	uint32_t cgram;      // glyph region for this size
 } LineFmt;
 
-static const LineFmt LineFmtMain = { 0b10, 0b10, Spacing_MAIN, 16 * 3 + Spacing_MAIN, Xpos_MAIN, Ypos_MAIN, CGRAM_BASE_MAIN };
+// Main line: 16x32 font, x3 wide (the 18 cells fill the width) and x4 tall: 48x128 px cells.
+static const LineFmt LineFmtMain = { 0b10, 0b10, 0b11, Spacing_MAIN, 16 * 3 + Spacing_MAIN, Xpos_MAIN, Ypos_MAIN, CGRAM_BASE_MAIN };
 // The aux line uses the 32-dot font drawn x2 (32x64 px cells), so it draws its glyphs from the same 16x32 set as the main line.
-static const LineFmt LineFmtAux  = { 0b10, 0b01, Spacing_AUX,  16 * 2 + Spacing_AUX,  Xpos_AUX,  Ypos_AUX,  CGRAM_BASE_MAIN };
+static const LineFmt LineFmtAux  = { 0b10, 0b01, 0b01, Spacing_AUX,  16 * 2 + Spacing_AUX,  Xpos_AUX,  Ypos_AUX,  CGRAM_BASE_MAIN };
 
 static int GlyphCodeFor(char c)
 {
@@ -78,7 +80,7 @@ static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
 			SetCGRAMStart_LT(f->cgram);
 			ConfigureFontAndPosition(
 				0b10,    // User-defined font
-				f->height, 0b00, 0, 0, 1, f->mult, f->mult, 1, f->spacing,
+				f->height, 0b00, 0, 0, 1, f->wmult, f->hmult, 1, f->spacing,
 				f->x, f->y0 + i * f->pitch);
 			WriteRegister(0x04);
 			WriteData(0x00);              // code, high byte
@@ -92,7 +94,7 @@ static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
 			seg[len] = '\0';
 			ConfigureFontAndPosition(
 				0b00,    // built-in font
-				f->height, 0b00, 0, 0, 1, f->mult, f->mult, 1, f->spacing,
+				f->height, 0b00, 0, 0, 1, f->wmult, f->hmult, 1, f->spacing,
 				f->x, f->y0 + i * f->pitch);
 			DrawText(seg);
 			i += len;
@@ -269,8 +271,8 @@ void DisplayMain() {
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
 				1,       // Rotate 90 degrees counterclockwise
-				0b10,    // Width multiplier
-				0b10,    // Height multiplier
+				LineFmtMain.wmult,    // Width multiplier
+				LineFmtMain.hmult,    // Height multiplier
 				1,       // Line spacing
 				LineFmtMain.spacing,   // Character spacing
 				LineFmtMain.x,         // Cursor X
@@ -289,8 +291,8 @@ void DisplayMain() {
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
 				1,       // Rotate 90 degrees counterclockwise
-				0b10,    // Width multiplier
-				0b10,    // Height multiplier
+				LineFmtMain.wmult,    // Width multiplier
+				LineFmtMain.hmult,    // Height multiplier
 				1,       // Line spacing
 				LineFmtMain.spacing,   // Character spacing
 				LineFmtMain.x,         // Cursor X
@@ -422,8 +424,8 @@ void DisplayAux() {
 			0,       // Full alignment enabled
 			0,       // Chroma keying disabled
 			1,       // Rotate 90 degrees counterclockwise
-			LineFmtAux.mult,    // Width multiplier
-			LineFmtAux.mult,    // Height multiplier
+			LineFmtAux.wmult,    // Width multiplier
+			LineFmtAux.hmult,    // Height multiplier
 			5,       // Line spacing
 			LineFmtAux.spacing,       // Character spacing
 			LineFmtAux.x,     // Cursor X
@@ -671,7 +673,7 @@ void DisplayCloneDeterminationAux(void)
 		0b01,    // Height multiplier
 		5,       // Line spacing
 		0,       // Character spacing
-		Xpos_AUX,
+		BOOT_SPEED_X,
 		Ypos_AUX);
 	char loopStr[32];
 
@@ -788,8 +790,8 @@ void GlyphSelfTest(void)
 //******************************************************************************
 // Boot screen: shown at boot for the first few boots, before the live display starts, so nothing else is being drawn.
 // Layout: speed line (aux size) from DisplayCloneDeterminationAux; credit and timing lines below it in the 16-dot font.
-#define BOOT_CREDIT_X    352   // 16-dot lines under the speed line (aux row 296..344 at boot): 352..368 and 374..390
-#define BOOT_SETTINGS_X  374
+#define BOOT_CREDIT_X    262   // boot screen: speed line (aux size) at BOOT_SPEED_X, then these two 16-dot lines
+#define BOOT_SETTINGS_X  286
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 {
 	ClearScreen();
