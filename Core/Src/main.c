@@ -813,8 +813,10 @@ int main(void) {
 				else if (pinA11 == GPIO_PIN_RESET && pinA12 == GPIO_PIN_RESET && pinA11 == pinA12) {
 					// Button is pressed (both pins are the same, and LOW)
 					if (!oneVoltmodepreviousState) {
-						// Toggle the mode on the first detection of the press
+						// Toggle the mode on the first detection of the press (only if the 1V mode is built in; see ONE_VOLT_MODE in display.h)
+#if ONE_VOLT_MODE
 						oneVoltmode = !oneVoltmode;
+#endif
 					}
 					// Update the previous state
 					oneVoltmodepreviousState = true;

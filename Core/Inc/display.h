@@ -45,6 +45,12 @@ void DisplayAnnunciatorsHalf(void);
 void DisplaySplash(void);
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of);   // boot-time diagnostics screen (speed, credits, timing settings)
 
+// ONE_VOLT_MODE: Ian's 1 V display mode (on the 1000 mV range, pressing DCV shows the reading in volts: "+ 0.99999709 VDC", aux "1 V Range").
+// Default 0 = off: the DCV press no longer toggles it, so the code is inert. Build with -DONE_VOLT_MODE=1 to get Ian's behaviour back.
+#ifndef ONE_VOLT_MODE
+#define ONE_VOLT_MODE 0
+#endif
+
 // SPLASH_IN_LOOP=1 brings back Ian's splash drawn inside the live loop (it overlaps the live display); default 0 = boot screen only
 #ifndef SPLASH_IN_LOOP
 #define SPLASH_IN_LOOP 0
