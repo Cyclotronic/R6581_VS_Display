@@ -61,7 +61,7 @@ flag (`REG[0Ch]` bit 4). The idea: draw the next frame in a second buffer and fl
   fades over about 8 frames (about 33 ms).
 - Conclusion: no visible benefit, a second buffer to manage and extra latency. Not used.
 
-The code for this is not in this repository; the measurement method is in [BENCH-TOOLS.md](BENCH-TOOLS.md) (`events240.py`).
+The code for this is not in this repository; the slow-motion method and numbers are in [SLOW-MO-ANALYSIS.md](SLOW-MO-ANALYSIS.md).
 
 ## TFT panel timing presets
 

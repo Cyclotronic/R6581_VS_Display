@@ -38,6 +38,7 @@ Each folder has its own README with the flash and restore commands, checksums, a
 | Timing probe (`-DTIMING_PROBE=1`) at `-O0`, `-O2`, `-Os` | redraw 25 / 18.4 / 19.5 ms; `-O2` adopted for the latest build | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md), `tools/measure.py` |
 | Ohm redraw before and after loading glyphs once | 45.3 ms to 26.1 ms | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) |
 | LT7680 page flip (VSYNC, `REG[20h-23h]`) | works, no visible benefit; not merged | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md), `tools/events240.py` |
+| 240 fps slow-motion analysis of display updates | in-place redraw already updates within about one frame; no visible tearing | [SLOW-MO-ANALYSIS.md](SLOW-MO-ANALYSIS.md), `tools/events240.py` |
 | Layout options and the taller main line | shipped layout in [LAYOUT.md](LAYOUT.md); taller line rejected (tick limit, lens interference) | [LAYOUT.md](LAYOUT.md), `images/layout_*.png`, `tools/layout_diagram.py` |
 | Boot screen design | centred, inside X 128 to 352 | [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md), `images/boot_screen.png`, `tools/boot_screen_mockup.py`, `tools/make_logo.py` |
 | Ian's 1 V mode | works, off by default | [ONE-VOLT-MODE.md](ONE-VOLT-MODE.md) |
