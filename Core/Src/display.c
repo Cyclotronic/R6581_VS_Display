@@ -448,31 +448,35 @@ void DisplayAnnunciators() {
 	// ANNUNCIATORS - Print or clear text on the LCD
 	const char* AnnuncNames[19] = {
 		"SMPL", "IDLE", "AUTO", "LOP", "NULL", "DFILT", "MATH", "AZERO",
-		"ERROR", "INFO", "FRONT", "REAR", "SLOT", "LO_G", "RMT", "TLK",   // ERR is shown as ERROR (5 x 8 px = 40 px, fits the 52 px slot)
+		"ERROR", "", "FRONT", "REAR", "", "LO_G", "RMT", "TLK",   // ERR shown as ERROR; INFO and SLOT are unused per the manual and left blank (they share a position)
 		"LTN", "SRQ"
 	};
 
 
-	// Set Y-position of the annunciators
+	// Y position of each annunciator: labels run one after another in 12 px character cells (24-dot font) with a
+	// gap between names. INFO and SLOT are blank and share the position of FRONT / LO_G. Layout after Hydron's display.c.
+	#define ANN_CELL 12
+	#define ANN_GAP  13
+	#define ANN_Y(chars, gaps) (Ypos_ANNUC + (chars) * ANN_CELL + (gaps) * ANN_GAP)
 	int AnnuncYCoords[19] = {
-		10,   // SMPL
-		62,   // IDLE
-		114,  // AUTO
-		166,  // LOP
-		218,  // NULL
-		270,  // DFILT
-		322,  // MATH
-		374,  // AZERO
-		426,  // ERR
-		478,  // INFO
-		530,  // FRONT
-		582,  // REAR
-		634,  // SLOT
-		686,  // LO_G
-		738,  // RMT
-		790,  // TLK
-		842,  // LTN
-		900   // SRQ
+		ANN_Y(0, 0),    // SMPL
+		ANN_Y(4, 1),    // IDLE
+		ANN_Y(8, 2),    // AUTO
+		ANN_Y(12, 3),   // LOP
+		ANN_Y(15, 4),   // NULL
+		ANN_Y(19, 5),   // DFILT
+		ANN_Y(24, 6),   // MATH
+		ANN_Y(28, 7),   // AZERO
+		ANN_Y(33, 8),   // ERROR
+		ANN_Y(38, 9),   // INFO (blank)
+		ANN_Y(38, 9),   // FRONT
+		ANN_Y(43, 10),  // REAR
+		ANN_Y(47, 11),  // SLOT (blank)
+		ANN_Y(47, 11),  // LO_G
+		ANN_Y(51, 12),  // RMT
+		ANN_Y(54, 13),  // TLK
+		ANN_Y(57, 14),  // LTN
+		ANN_Y(60, 15)   // SRQ
 	};
 
 
@@ -481,7 +485,7 @@ void DisplayAnnunciators() {
 			SetTextColors((i == 8) ? 0xFF0000 : AnnunColourFore, 0x000000); // Foreground: the annunciator colour (ERROR in red), Background: Black
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
-				0b00,    // 16-dot font size
+				0b01,    // 24-dot font size (12 px wide, x2 tall = 12x48)
 				0b00,    // ISO 8859-1
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
@@ -499,7 +503,7 @@ void DisplayAnnunciators() {
 			SetTextColors(0x000000, 0x000000); // Foreground: Black, Background: Black
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
-				0b00,    // 16-dot font size
+				0b01,    // 24-dot font size (12 px wide, x2 tall = 12x48)
 				0b00,    // ISO 8859-1
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
@@ -560,7 +564,7 @@ void DisplaySplash() {
 				0b00,    // Height multiplier
 				1,       // Line spacing
 				4,       // Character spacing
-				130,     // Cursor X
+				Xpos_SPLASH + 22,  // Cursor X: below the credit line, clear of the (taller) annunciator row at 126..174
 				640      // Cursor Y
 			);
 			char text2[] = "                        ";
@@ -600,7 +604,7 @@ void DisplaySplash() {
 				0b00,    // Height multiplier
 				1,       // Line spacing
 				4,       // Character spacing
-				130,     // Cursor X
+				Xpos_SPLASH + 22,  // Cursor X: below the credit line, clear of the (taller) annunciator row at 126..174
 				640      // Cursor Y
 			);
 			char textsettings[128]; // Ensure the buffer is large enough
