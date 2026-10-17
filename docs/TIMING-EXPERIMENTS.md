@@ -14,9 +14,10 @@ milliseconds. [`tools/measure.py`](tools/measure.py) flashes an image, lets it r
 
 ## Optimisation and delays: what is and is not different from Ian's build
 
-- **The builds here are not optimised.** Every image in `Prebuilt/` is built at `-O0`, the same as Ian's Debug build. The
-  speed-ups below come from removing work and waits, not from the compiler. `-O2` was measured (about 26 % faster redraw,
-  identical decode) but is **not** used; it is the obvious next step if more margin is wanted.
+- **Optimisation level.** The two Prebuilt images of 2026-10-16 and the first of 2026-10-17 are `-O0`, the same as Ian's Debug
+  build; the speed-ups in the table below come from removing work and waits, not from the compiler. From the third 2026-10-17
+  image on, `Prebuilt/` is built at **`-O2`** (about 26 % faster redraw, identical decode in a 42-step run; redraw 18.4 ms against
+  25 ms at `-O0`). The `-O2` image was also run through the boot counter and the DCV-hold reset on the bench; a long display-off test and a full menu walk have not been repeated at `-O2`.
 - **Fixed delays removed in the glyph path.** Ian's code stored the ohm symbol again for every frame and waited with fixed
   `Delay_NonBlocking(5)` and `(2)` calls around it (about 17 ms per ohm screen). The glyphs are now loaded once (and after
   DISPLAY OFF), and the draw routine (`DrawLineWithGlyphs`) waits only for the LT7680 to report ready

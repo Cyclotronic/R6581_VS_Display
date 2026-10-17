@@ -11,6 +11,8 @@ polished; take what is useful. Python 3 with `numpy` and `Pillow` is needed for 
 | `measure.py` | Flashes an image and reads the timing probe variables (see [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md)). Set `OPENOCD_DIR` to an xPack openocd install. |
 | `events240.py` | Per-digit update timing from a 120/240 fps slow-motion clip: finds each reading change and the frame in which each digit column starts to move. Atomic (page-flip) updates start all columns in the same frame. |
 | `layout_diagram.py` | Draws the to-scale layout pictures in `images/`. |
+| `make_logo.py` | Builds `Core/Inc/boot_logo.h`, the 1-bit bitmap of Ian's character for the boot screen, from the silkscreen layer in `Hardware/7680-Controller_backside4_V1_2.zip` (`python -I make_logo.py <repo-root> 48`). |
+| `boot_screen_mockup.py` | Draws the to-scale boot-screen picture in `images/boot_screen.png` from `Core/Inc/boot_logo.h`. |
 | `make_sigma.py` | Generates the 16x32 and 12x24 sigma bitmaps used for the custom glyph. |
 
 ## Method that worked

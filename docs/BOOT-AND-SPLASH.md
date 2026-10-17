@@ -15,19 +15,36 @@ Nothing is lost: the same information is still shown, and can be brought back on
 
 ## What you see
 
-For boots 1 to 10 the TFT shows this for about 9 seconds (the speed test, then a 4 s boot screen), then the live display starts:
+![boot screen mock-up](images/boot_screen.png)
 
-| Line | Colour | Text |
-| --- | --- | --- |
-| speed result | white | `BluePill speed = N` (see below) |
-| credits | green | `Reverse engineering by By MickleT / TFT LCD by Ian Johnston` |
-| settings | grey | the seven TFT timing numbers (e.g. `17 14 2 50 30 10 ...`), the panel code, then `boot 3/10 - hold DCV at power-up to repeat` |
+*(To-scale mock-up drawn from the constants in the code, `tools/boot_screen_mockup.py`; the real screen uses the panel's built-in fonts.)*
+
+For boots 1 to 10 the TFT shows this for about 9 seconds (the speed test, then a 4 s boot screen), then the live display starts.
+Everything is centred and kept inside the vertical band the live display uses (X 128, the top of the annunciator row, to X 352,
+the bottom of the aux row), so it is as visible as the live display is:
+
+| Row (top to bottom) | Colour | Font | Text |
+| --- | --- | --- | --- |
+| speed result | grey | 24-dot | `BluePill speed = N` (see below) |
+| note 1 | white | 32-dot | `Splash + timing test: first 10 boots only` |
+| note 2 | white | 32-dot | `After that, hold DCV at power-up to reset` |
+| settings | grey | 24-dot | the seven TFT timing numbers and panel code, then `boot n/10`, e.g. `17 14 2 50 30 10 60 AdaF   boot 3/10` |
+| credits | green | 24-dot | `Reverse engineering by MickleT / TFT LCD by Ian Johnston`, with Ian's character (48 px tall, same green) to the right |
+
+The two notes are the largest text on the screen on purpose: they are what a user needs to know, that this screen is not a
+fault and how to bring it back.
+
+**The character** is the figure from the front silkscreen of Ian's own PCB (`Hardware/7680-Controller_backside4_V1_2.zip`,
+drawn there as filled Gerber regions; it also appears in the banner of ianjohnston.com). `tools/make_logo.py` turns it into a
+1-bit bitmap (`Core/Inc/boot_logo.h`, 240 bytes at 48 px) and `DrawBootLogo_LT()` writes it through the LT7680's active window
+in one colour. The artwork is Ian's; it is shown on the boot screen only, next to the credit to him. To drop it, remove the
+`DrawBootLogo_LT()` call in `DisplayBootScreen()`.
 
 From boot 11 the board reaches the live display about 3.5 s after power-up. Boots 1 to 10 take about 9.2 s.
 
 `BluePill speed` is the same test as before (it counts loop passes in a fixed time to tell a genuine STM32F103 from a slower
 clone). The number depends on the optimisation level, so compare like with like: a good board gives about 1.47 to 1.50
-million at `-O0` (Ian's Debug build and the Prebuilt images) and about 2.3 million at `-O2`.
+million at `-O0` (Ian's Debug build and the first Prebuilt images) and about 2.3 million at `-O2` (the Prebuilt images from 2026-10-17 on).
 
 ## How it works
 
@@ -64,7 +81,8 @@ Example (see [BENCH-TOOLS.md](BENCH-TOOLS.md)): `EXTRA_CFLAGS="-DBOOT_DIAG_SHOWS
 
 - `Core/Src/main.c`: `BOOT_DIAG_SHOWS`, `BOOT_SCREEN_MS`, `BootCountRead/Increment/Reset`, and the block just before the
   boot `ClearScreen()` that decides whether to show the boot screen. `RunBluePillSpeedTestOffline()` ends by drawing it.
-- `Core/Src/display.c`: `DisplayBootScreen()`; `DisplaySplash()` returns at once unless `SPLASH_IN_LOOP` is 1.
+- `Core/Src/display.c`: `DisplayBootScreen()` (layout constants `BOOT_*_ROW_X` just above it); `DisplaySplash()` returns at once unless `SPLASH_IN_LOOP` is 1.
+- `Core/Src/lt7680.c`, `Core/Inc/boot_logo.h`: `DrawBootLogo_LT()` and the bitmap.
 
 ## Tested
 

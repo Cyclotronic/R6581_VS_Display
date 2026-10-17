@@ -11,7 +11,7 @@ not a problem; every change is explained here, with how to undo it.
 | [LAYOUT.md](LAYOUT.md) | Panel geometry, the three display rows, the layout table, the taller-middle-line experiment (rejected: lens interference). |
 | [BENCH-TOOLS.md](BENCH-TOOLS.md) | The scripts in [`tools/`](tools/): build script, SWD reader, menu-walk logger, timing probe reader, slow-motion video analysis. |
 
-Ready-to-flash builds are in [`../Prebuilt/`](../Prebuilt/); each folder has its own README, checksums and flashing commands.
+The newest build (`-O2`, new boot screen) is `../Prebuilt/test-2026-10-17-O2-bootscreen/`. Ready-to-flash builds are in [`../Prebuilt/`](../Prebuilt/); each folder has its own README, checksums and flashing commands.
 
 Other changes in this fork (sigma and ohm as loaded-once custom glyphs, red ERROR, larger annunciators) are described in
 [`../Prebuilt/hydron-test-2026-10-16/README.md`](../Prebuilt/hydron-test-2026-10-16/README.md).

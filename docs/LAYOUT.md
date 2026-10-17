@@ -34,5 +34,5 @@ Drawing the main line 4x tall (48 x 128) let the three rows spread evenly with a
 It was reverted. If your lens differs you might prefer it; the geometry is the last panel of `images/layout_taller_main.png`,
 drawn by `tools/layout_diagram.py`.
 
-The boot screen has its own layout (the speed line at the aux size, then two 16-dot lines below it), because nothing else is
-on screen during boot.
+The boot screen has its own layout, centred and kept inside the same vertical band as the live rows (X 128 to 352), because
+nothing else is on screen during boot; see [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md).
