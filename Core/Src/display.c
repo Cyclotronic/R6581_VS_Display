@@ -564,7 +564,7 @@ void DisplaySplash() {
 				0b00,    // Height multiplier
 				1,       // Line spacing
 				4,       // Character spacing
-				130,     // Cursor X
+				Xpos_SPLASH + 22,  // Cursor X: below the credit line, clear of the (taller) annunciator row at 126..174
 				640      // Cursor Y
 			);
 			char text2[] = "                        ";
@@ -604,7 +604,7 @@ void DisplaySplash() {
 				0b00,    // Height multiplier
 				1,       // Line spacing
 				4,       // Character spacing
-				130,     // Cursor X
+				Xpos_SPLASH + 22,  // Cursor X: below the credit line, clear of the (taller) annunciator row at 126..174
 				640      // Cursor Y
 			);
 			char textsettings[128]; // Ensure the buffer is large enough
