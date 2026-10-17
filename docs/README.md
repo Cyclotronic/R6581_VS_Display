@@ -6,6 +6,7 @@ not a problem; every change is explained here, with how to undo it.
 
 | Document | What it covers |
 | --- | --- |
+| [CHANGES-AND-FINDINGS.md](CHANGES-AND-FINDINGS.md) | **Start here:** every change made to Ian's firmware, what it fixed, what was checked, and what is still open. |
 | [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md) | **Behaviour change:** the speed test and splash now run at boot, for the first 10 boots only. Why, how it works, how to reset it, how to get Ian's original behaviour back. |
 | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) | Redraw times per build and per screen, the 35 ms tick budget, optimisation levels, the page-flip experiment, what was tried and rejected. |
 | [LAYOUT.md](LAYOUT.md) | Panel geometry, the three display rows, the layout table, the taller-middle-line experiment (rejected: lens interference). |
