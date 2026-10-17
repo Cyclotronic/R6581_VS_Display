@@ -33,6 +33,73 @@ uint32_t AuxColourForeLS = 0xA0A0A0; // Grey
 
 static void CheckDisplayStatus(void);
 
+//******************************************************************************
+// Custom glyph drawing
+//
+// The decode table maps the VFD's ohm and sigma patterns to placeholder characters ('$' and 0x7F). Those are not in
+// the built-in font, so a line containing them is drawn in pieces: ordinary text from the built-in font, each
+// placeholder from the user-defined glyph regions (see LoadCustomGlyphs_LT). One routine serves the MAIN and AUX lines.
+#define GLYPH_PLACEHOLDER_OHM    '$'
+#define GLYPH_PLACEHOLDER_SIGMA  '\x7F'
+
+typedef struct {
+	uint8_t  height;     // font height code: 0b01 = 24-dot, 0b10 = 32-dot
+	uint8_t  mult;       // width/height multiplier code
+	uint8_t  spacing;    // character spacing
+	uint16_t pitch;      // pixels per character cell along the line (glyph width * multiplier + spacing)
+	uint16_t x;          // cursor X (the line's position across the rotated display)
+	uint16_t y0;         // cursor Y of the first character
+	uint32_t cgram;      // glyph region for this size
+} LineFmt;
+
+static const LineFmt LineFmtMain = { 0b10, 0b10, 4, 16 * 3 + 4, Xpos_MAIN, Ypos_MAIN, CGRAM_BASE_MAIN };
+static const LineFmt LineFmtAux  = { 0b01, 0b01, 0, 12 * 2,     Xpos_AUX,  Ypos_AUX,  CGRAM_BASE_AUX  };
+
+static int GlyphCodeFor(char c)
+{
+	if (c == GLYPH_PLACEHOLDER_OHM)   return GLYPH_CODE_OHM;
+	if (c == GLYPH_PLACEHOLDER_SIGMA) return GLYPH_CODE_SIGMA;
+	return -1;
+}
+
+static int HasGlyph(const char* s, int n)
+{
+	for (int i = 0; i < n && s[i]; i++) if (GlyphCodeFor(s[i]) >= 0) return 1;
+	return 0;
+}
+
+static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
+{
+	int i = 0;
+	while (i < n && s[i]) {
+		int code = GlyphCodeFor(s[i]);
+		if (code >= 0) {
+			SetCGRAMStart_LT(f->cgram);
+			ConfigureFontAndPosition(
+				0b10,    // User-defined font
+				f->height, 0b00, 0, 0, 1, f->mult, f->mult, 1, f->spacing,
+				f->x, f->y0 + i * f->pitch);
+			WriteRegister(0x04);
+			WriteData(0x00);              // code, high byte
+			WriteData((uint8_t)code);     // code, low byte
+			WaitForLT7680Ready();
+			i++;
+		} else {
+			char seg[32];
+			int len = 0;
+			while (i + len < n && s[i + len] && GlyphCodeFor(s[i + len]) < 0 && len < 31) { seg[len] = s[i + len]; len++; }
+			seg[len] = '\0';
+			ConfigureFontAndPosition(
+				0b00,    // built-in font
+				f->height, 0b00, 0, 0, 1, f->mult, f->mult, 1, f->spacing,
+				f->x, f->y0 + i * f->pitch);
+			DrawText(seg);
+			i += len;
+		}
+	}
+}
+
+
 _Bool onethousandmVmodedetected;
 char MaindisplayString[19] = "";              // String for G[1] to G[18]
 _Bool displayBlank = false;
@@ -77,87 +144,10 @@ void DisplayMain() {
 
 	// If in 2W or 4W Resistance measurement mode the display will contain the OHM symbol on the MAIN display.
 	// If it appears then the dollarPositionAUX var will not be 0xFFFF
-	if (dollarPosition != 0xFFFF) {
+	if (HasGlyph(MaindisplayString, 18)) {
 
-		// $ symbol found
-		// Before
-		ConfigureFontAndPosition(
-			0b00,    // Internal CGROM
-			0b10,    // Font size
-			0b00,    // ISO 8859-1
-			0,       // Full alignment enabled
-			0,       // Chroma keying disabled
-			1,       // Rotate 90 degrees counterclockwise
-			0b10,    // Width multiplier
-			0b10,    // Height multiplier
-			1,       // Line spacing
-			4,       // Character spacing
-			Xpos_MAIN,      // Cursor X
-			0        // Cursor Y
-		);
-		char MaindisplayStringBefore[19] = "";
-		for (int i = 1; i <= 18; i++) {
-			if (G[i] == '$') break;
-			MaindisplayStringBefore[i - 1] = G[i];
-		}
-		DrawText(MaindisplayStringBefore);
-
-		//HAL_Delay(5);
-		Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-
-		ResetGraphicWritePosition_LT();
-		Ohms16x32SymbolStoreUCG();			// This is called here rather than pre-defined because the 2nd UCG below is a different size
-		Text_Mode();
-
-		// Ohm Symbol
-		// Calculate position of $ symbol
-		//       yposohm = (dollarPosition * widthmultiplier * fontwidth) + (characterspacing * dollarPosition) + startoffset(6)
-		uint16_t yposohm = (dollarPosition * 3 * 16) + (4 * dollarPosition);  // Y position of the OHM symbol
-		// The actual OHM
-		ConfigureFontAndPosition(
-			0b10,    // User-Defined Font mode
-			0b10,    // Font size
-			0b00,    // ISO 8859-1
-			0,       // Full alignment enabled
-			0,       // Chroma keying disabled
-			1,       // Rotate 90 degrees counterclockwise
-			0b10,    // Width multiplier
-			0b10,    // Height multiplier
-			1,       // Line spacing
-			4,       // Character spacing
-			Xpos_MAIN,      // Cursor X 170
-			yposohm  // Cursor Y 480	780
-		);
-		// Write the OHM symbol
-		WriteRegister(0x04);
-		WriteData(0x00);    // high byte
-		WriteData(0x00);    // low byte
-
-		//HAL_Delay(2);
-		Delay_NonBlocking(2);  // Wait ms in a non-blocking way
-
-		// After
-		ConfigureFontAndPosition(
-			0b00,    // Internal CGROM
-			0b10,    // Font size
-			0b00,    // ISO 8859-1
-			0,       // Full alignment enabled
-			0,       // Chroma keying disabled
-			1,       // Rotate 90 degrees counterclockwise
-			0b10,    // Width multiplier
-			0b10,    // Height multiplier
-			1,       // Line spacing
-			4,       // Character spacing
-			Xpos_MAIN,      // Cursor X
-			(dollarPosition * 52) + 52        // Cursor Y	832
-		);
-		char MaindisplayStringAfter[19] = ""; // Adjust the size to match your max expected characters
-		int j = 0; // Index for the new string
-		for (int i = dollarPosition + 1; i <= 18; i++) { // Start after the $ and loop through the rest
-			MaindisplayStringAfter[j++] = MaindisplayString[i]; // Copy characters to the new string
-		}
-		MaindisplayStringAfter[18] = '\0'; // Null-terminate the new string
-		DrawText(MaindisplayStringAfter);
+		// Ohm and/or sigma on the MAIN line: drawn in pieces by the central routine
+		DrawLineWithGlyphs(MaindisplayString, 18, &LineFmtMain);
 
 	} else {
 
@@ -344,6 +334,7 @@ void CheckDisplayStatus() {
 			// Changed from "DISPLAY OFF" to something else, i.e. user has pressed a button to revive
 			ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 			LCDConfigTurnOn_LT();
+			LoadCustomGlyphs_LT();    // glyph memory is reloaded after DISPLAY OFF
 		}
 	}
 
@@ -385,76 +376,18 @@ void DisplayAux() {
 	uint16_t yposohm = 0; // Initialize y-position for OHM symbol
 	uint16_t yposoffset = 60; // Initialize y-position for OHM symbol
 
-	if (dollarCount != 0) {
+	int auxHasGlyph = HasGlyph(AuxdisplayString, 29);
 
-		// Process text and OHM symbols based on dollarCount
-		for (int d = 0; d <= dollarCount; d++) {
-			// Calculate start and end positions for text
-			int start = (d == 0) ? 0 : dollarPositions[d - 1] + 1;
-			int end = (d < dollarCount) ? dollarPositions[d] : 30;
+	if (auxHasGlyph) {
 
-			// Print text before or between $ symbols
-			if (start < end) {
-				char AuxdisplaySegment[30] = "";
-				for (int i = start; i < end; i++) {
-					AuxdisplaySegment[i - start] = AuxdisplayString[i];
-				}
-				AuxdisplaySegment[end - start] = '\0'; // Null-terminate
-
-				ConfigureFontAndPosition(
-					0b00,    // Internal CGROM
-					0b01,    // Font size
-					0b00,    // ISO 8859-1
-					0,       // Full alignment enabled
-					0,       // Chroma keying disabled
-					1,       // Rotate 90 degrees counterclockwise
-					0b01,    // Width multiplier
-					0b01,    // Height multiplier
-					1,       // Line spacing
-					0,       // Character spacing
-					Xpos_AUX,     // Cursor X
-					yposohm = yposoffset + (start * 12 * 2) // Dynamically adjust position, offset + (position * 12 pixel width character * 2)
-				);
-				DrawText(AuxdisplaySegment);
-			}
-
-			//HAL_Delay(5);
-			Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-
-			ResetGraphicWritePosition_LT();
-			Ohms12x24SymbolStoreUCG(); // This is called here rather than pre-defined because the 1st UCG above is a different size
-			Text_Mode();
-
-			// Print OHM symbol if within dollarCount
-			if (d < dollarCount) {
-				uint16_t calculated_value = (dollarPositions[d] * 12 * 2);		// 12 pixel width character * 2
-				yposohm = yposoffset + (uint16_t)calculated_value;
-
-				ConfigureFontAndPosition(
-					0b10,    // User-Defined Font mode
-					0b01,    // Font size
-					0b00,    // ISO 8859-1
-					0,       // Full alignment enabled
-					0,       // Chroma keying disabled
-					1,       // Rotate 90 degrees counterclockwise
-					0b01,    // Width multiplier
-					0b01,    // Height multiplier
-					1,       // Line spacing
-					0,       // Character spacing
-					Xpos_AUX,     // Cursor X
-					yposohm  // Cursor Y
-				);
-				WriteRegister(0x04);
-				WriteData(0x00);    // high byte
-				WriteData(0x00);    // low byte
-			}
-		}
+		// Ohm and/or sigma on the AUX line: drawn in pieces by the central routine
+		DrawLineWithGlyphs(AuxdisplayString, 29, &LineFmtAux);
 
 	}
 
 	// If no $ symbols were found, print the entire string as-is	
 
-	if (dollarCount == 0) {
+	if (!auxHasGlyph) {
 
 		// Detect 1000mV Range
 		//if ((strstr(MaindisplayString, "OVERLOAD") == NULL) &&			// does not contain
@@ -515,7 +448,7 @@ void DisplayAnnunciators() {
 	// ANNUNCIATORS - Print or clear text on the LCD
 	const char* AnnuncNames[19] = {
 		"SMPL", "IDLE", "AUTO", "LOP", "NULL", "DFILT", "MATH", "AZERO",
-		"ERR", "INFO", "FRONT", "REAR", "SLOT", "LO_G", "RMT", "TLK",
+		"ERROR", "INFO", "FRONT", "REAR", "SLOT", "LO_G", "RMT", "TLK",   // ERR is shown as ERROR (5 x 8 px = 40 px, fits the 52 px slot)
 		"LTN", "SRQ"
 	};
 
@@ -545,7 +478,7 @@ void DisplayAnnunciators() {
 
 	for (int i = 0; i < 18; i++) {
 		if (Annunc[i + 1] == 1) {  // Turn the annunciator ON
-			SetTextColors(AnnunColourFore, 0x000000); // Foreground: Green, Background: Black
+			SetTextColors((i == 8) ? 0xFF0000 : AnnunColourFore, 0x000000); // Foreground: the annunciator colour (ERROR in red), Background: Black
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
 				0b00,    // 16-dot font size
@@ -739,3 +672,106 @@ void DisplayCloneDeterminationAux(void)
 
 	DrawText(loopStr);
 }
+
+
+//******************************************************************************
+// GLYPH SELF-TEST (build with -DGLYPH_SELFTEST=1)
+//
+// Runs once at boot, before normal operation. It fills G[] and Annunc[] with test data and calls the
+// real DisplayMain()/DisplayAux()/DisplayAnnunciators(), so it exercises exactly the production
+// drawing path (fonts, sizes, spacing, the $ -> ohm glyph split) without the meter sending anything.
+//
+//  Pages 1-6 : every printable ASCII char 0x20-0x7E (except '$', tested on the ohm pages) on the MAIN and AUX lines
+//  Page  7   : the special codes the font table can return (micro, degree, arrows, diag-mode patterns)
+//  Page  8   : ohm symbol, MAIN and AUX ("$" placeholder), 2W
+//  Page  9   : all 18 annunciators ON
+//  Page 10   : all annunciators OFF + a long worst-case line
+//  Page 11-12: sigma / ohm custom glyphs (statistics screen; mixed on both lines)
+// Each page is held for GLYPH_PAGE_MS. A page label is shown at the splash position.
+//******************************************************************************
+#if GLYPH_SELFTEST
+
+#define GLYPH_PAGE_MS 9000
+
+static void GlyphLabel(int page, int total)
+{
+	char buf[20];
+	snprintf(buf, sizeof(buf), "GLYPH TEST %d/%d", page, total);
+	SetTextColors(0x00FFFF, 0x000000);
+	ConfigureFontAndPosition(
+		0b00, 0b00, 0b00,   // CGROM, 16-dot, ISO 8859-1
+		0, 0, 1,            // alignment off, chroma key off, rotate 90
+		0b00, 0b00, 1, 4,   // X1, X1, line spacing 1, char spacing 4
+		Xpos_SPLASH, 100);
+	DrawText(buf);
+}
+
+static void GlyphPage(const char* main18, const char* aux29, _Bool annOn, int page, int total)
+{
+	int i;
+	for (i = 1; i <= 47; i++) G[i] = ' ';
+	for (i = 0; i < 18 && main18[i]; i++) G[1 + i] = main18[i];
+	for (i = 0; i < 29 && aux29[i]; i++) G[19 + i] = aux29[i];
+	for (i = 1; i <= 18; i++) Annunc[i] = annOn;
+
+	ClearScreen();
+	DisplayMain();
+	DisplayAux();
+	DisplayAnnunciators();
+	GlyphLabel(page, total);
+	Delay_NonBlocking(GLYPH_PAGE_MS);
+}
+
+void GlyphSelfTest(void)
+{
+	// All printable ASCII except '$' (94 chars)
+	char all[96];
+	int n = 0, c;
+	for (c = 0x20; c <= 0x7E; c++) if (c != '$') all[n++] = (char)c;
+	all[n] = '\0';
+
+	const int total = 12;
+	char main18[19], aux29[30];
+	int page;
+
+	for (page = 0; page < 6; page++) {
+		int start = page * 18;
+		memset(main18, ' ', 18); main18[18] = '\0';
+		for (int i = 0; i < 18 && (start + i) < n; i++) main18[i] = all[start + i];
+		// AUX shows the same 18 chars so every char is checked at both sizes
+		memset(aux29, ' ', 29); aux29[29] = '\0';
+		memcpy(aux29, main18, 18);
+		GlyphPage(main18, aux29, 0, page + 1, total);
+	}
+
+	// Page 7: special codes
+	{
+		const unsigned char sp[18] = { 0xB5, 0xB0, 0x10, 0x11, 0x1A, 0x1E, 0x1F, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C, 0x16 };
+		for (int i = 0; i < 18; i++) main18[i] = (char)sp[i];
+		main18[18] = '\0';
+		memset(aux29, ' ', 29); aux29[29] = '\0';
+		memcpy(aux29, main18, 18);
+		GlyphPage(main18, aux29, 0, 7, total);
+	}
+
+	// Page 8: ohm symbol on both lines, in the same forms the meter sends
+	GlyphPage("  1.234567    k$2W", " 10k$ Range  OHM$TEST $       ", 0, 8, total);
+
+	// Page 9: every annunciator ON, with a realistic reading
+	GlyphPage("- 1.234567     VDC", "  10 V Range                 ", 1, 9, total);
+
+	// Page 10: annunciators OFF, worst-case wide line
+	GlyphPage("-123.45678E+00 mVDC", "1000mV Range  STATISTICS    ", 0, 10, total);
+
+	// Page 11: the statistics screen as the meter sends it - sigma label (0x7F placeholder) on the aux line
+	GlyphPage(" 3.0651986E-04     ", "\x7F             \x1e\x1f" "key:NEXT DATA", 0, 11, total);
+
+	// Page 12: ohm and sigma mixed on both lines, several per line
+	GlyphPage("\x7F $ \x7F$ 1.234 $\x7F", "$ \x7F $ \x7F $\x7F  \x7F$  $$  ", 0, 12, total);
+
+	ClearScreen();
+	for (int i = 1; i <= 47; i++) G[i] = ' ';
+	for (int i = 1; i <= 18; i++) Annunc[i] = 0;
+}
+
+#endif // GLYPH_SELFTEST
