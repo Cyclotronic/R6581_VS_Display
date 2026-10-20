@@ -373,3 +373,5 @@ FodyWeavers.xsd
 !VisualGDB/Debug/
 !VisualGDB/Debug/**
 
+# Local build output of docs/tools/build.sh
+docs/tools/images/

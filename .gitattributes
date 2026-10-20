@@ -3,6 +3,9 @@
 ###############################################################################
 * text=auto
 
+# Shell scripts must stay LF on every platform (bash fails on CRLF)
+*.sh text eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

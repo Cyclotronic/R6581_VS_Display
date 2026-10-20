@@ -6,7 +6,8 @@ not a problem; every change is explained here, with how to undo it.
 
 | Document | What it covers |
 | --- | --- |
-| [CHANGES-AND-FINDINGS.md](CHANGES-AND-FINDINGS.md) | **Start here:** every change made to Ian's firmware, what it fixed, what was checked, and what is still open. |
+| [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md) | **Build environment and procedure:** toolchain, openocd, build script, flashing, backup and restore, settings page, build options, how to make and publish a change, troubleshooting. Written for a person or an LLM agent to follow step by step. |
+| [CHANGES-AND-FINDINGS.md](CHANGES-AND-FINDINGS.md) | **Start here for the project:** every change made to Ian's firmware, what it fixed, what was checked, and what is still open. |
 | [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md) | **Behaviour change:** the speed test and splash now run at boot, for the first 10 boots only. Why, how it works, how to reset it, how to get Ian's original behaviour back. |
 | [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) | Redraw times per build and per screen, the 35 ms tick budget, optimisation levels, the page-flip experiment, what was tried and rejected. |
 | [SLOW-MO-ANALYSIS.md](SLOW-MO-ANALYSIS.md) | The 240 fps slow-motion study of display updates: method, numbers, and why it showed no tearing and no benefit from page flip. |
