@@ -240,6 +240,50 @@ void Settings_Load(void) {
 
 
 //**************************************************************************************************
+// Two lines on the timing-adjust page identifying the hardware, for diagnosing boards that differ (docs/BLUE-PILL-CHIPS.md):
+// the Blue Pill's core CPUID (0x411FC231 on ST's STM32F103), its device ID register (reads 0 on ST's STM32F103 without a
+// debugger attached, an ST erratum), flash size, and whether the DWT cycle counter that DelayMicroseconds() relies on runs;
+// then the panel's ST7701S ID bytes (read at boot) and how the LT7680 set-up went. The LT7680 has no ID register.
+static void DrawIdLine(uint16_t x, const char* s) {
+	SetTextColors(0x00FFFF, 0x000000); // Foreground: cyan, Background: Black
+	ConfigureFontAndPosition(
+		0b00,    // Internal CGROM
+		0b00,    // Font size
+		0b00,    // ISO 8859-1
+		0,       // Full alignment enabled
+		0,       // Chroma keying disabled
+		1,       // Rotate 90 degrees counterclockwise
+		0b00,    // Width multiplier
+		0b00,    // Height multiplier
+		1,       // Line spacing
+		4,       // Character spacing
+		x,       // Cursor X
+		0        // Cursor Y
+	);
+	DrawText(s);
+}
+
+static void DrawChipId(void) {
+	char line[80];
+	uint32_t c0 = DWT->CYCCNT;
+	uint8_t cyc_ok = !(DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) && (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) && DWT->CYCCNT != c0;
+
+	snprintf(line, sizeof(line), "MCU    CPUID %08lX  ID %08lX  Flash %uKB  Cycle counter %s",
+		(unsigned long)SCB->CPUID, (unsigned long)DBGMCU->IDCODE, *(volatile uint16_t*)FLASHSIZE_BASE,
+		cyc_ok ? "OK" : "MISSING");
+	DrawIdLine(340, line);
+
+	char panel[16], lt[24];
+	if (lcd_id == 0xFFFFFFFFu) strcpy(panel, "no reply");
+	else snprintf(panel, sizeof(panel), "%06lX", (unsigned long)lcd_id);
+	if (lt_fault) snprintf(lt, sizeof(lt), "fault %02X", lt_fault);
+	else strcpy(lt, "OK");
+	snprintf(line, sizeof(line), "Panel  ST7701S ID %s   LT7680 %s, %u %s", panel, lt, lt_init_attempts,
+		lt_init_attempts == 1 ? "try" : "tries");
+	DrawIdLine(360, line);
+}
+
+//**************************************************************************************************
 // Timing-adjust mode (DCV held at power-up): each DCV press steps to the next timing set, applies it and saves it.
 // Called from the main loop's 35 ms tick.
 void TimingAdjust_Poll(void) {
@@ -473,6 +517,8 @@ void TimingAdjust_Poll(void) {
 				);
 				DrawText(redefineValues);
 			}
+
+			DrawChipId();		// chip identities, below the timing rows
 
 			// Delay for button
 			//HAL_Delay(120);

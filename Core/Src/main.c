@@ -201,6 +201,7 @@ int main(void) {
 	// Panel set-up, second half, once LCD_SLEEPOUT_MS have passed since Sleep Out
 	while (HAL_GetTick() - boot_sleepout_ms < LCD_SLEEPOUT_MS) { }
 	if (buyDisplay) BuyDisplay_Init_Finish(); else AdaFruit_Init_Finish();
+	LCD_ReadID();					// panel identity for the timing-adjust page and SWD (about 0.2 ms)
 	boot_panel_ms = HAL_GetTick();
 
 	if (lt_fault) {					// LT7680 answers but part of its set-up failed: say so (now the panel is up), then carry on

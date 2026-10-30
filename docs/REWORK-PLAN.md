@@ -25,7 +25,9 @@ Status (2026-10-30):
   follows the meter's display at its full 111 frames a second, about 1 ms behind
   ([after Stage 7](#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30)).
 - **Visual checks:** the panel became visible after Stage 7. It comes up on a cold power-up and shows the meter's
-  power-on screen; the other checks are still to do ([list](#deferred-visual-checks)).
+  power-on screen; no flicker or colour faults; holding DCV at power-up starts timing-adjust mode and each DCV press
+  steps to the next set. DISPLAY OFF and the glyphs are with Hydron; the rest are still to do
+  ([list](#deferred-visual-checks)).
 
 ## Contents
 
@@ -322,13 +324,14 @@ Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and 
 To run now the panel can be seen. Build: `Prebuilt/rework-2026-10-30-O2/`, or the same source with `-DLT_REGDUMP=1` to also read
 the register dump.
 
-1. Panel is stable, with no flicker or colour faults. In particular, check the pixel clock: its frequency is unchanged,
-   but its PLL now runs inside the VCO range.
+1. ~~Panel is stable, with no flicker or colour faults~~: done (2026-10-30), flicker and colours look fine. The
+   pixel clock's PLL now runs inside the VCO range at an unchanged frequency.
 2. Backlight brightness and no visible PWM beat. The prescaler went from 16 to 28 to keep about 3.3 kHz at the 100 MHz
    core clock.
-3. Timing-adjust mode (hold DCV at power-up): step through all 6 sets, and check the boot count survives.
-4. DISPLAY OFF for 60 minutes, then on: the whole panel is clean, including the left edge and the gaps between rows.
-5. Ohms screen after an hour on another screen: the ohm glyph is intact.
+3. ~~Timing-adjust mode (hold DCV at power-up)~~: done (2026-10-30). Holding DCV at power-up starts it, and each DCV
+   press steps to the next set. (The boot count only matters with `BOOT_DIAG_SHOWS` on, which is off by default.)
+4. (With Hydron.) DISPLAY OFF for 60 minutes, then on: the whole panel is clean, including the left edge and the gaps between rows.
+5. (With Hydron.) Ohms screen after an hour on another screen: the ohm glyph is intact.
 6. Right edge (Stage 6): the wipe is off by default. Display memory there reads black in every check, so anything
    still seen at the edge would not come from memory content. Look for it anyway; `-DEDGE_WIPE=1` brings the wipe back
    on full repaints.

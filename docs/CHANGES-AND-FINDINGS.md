@@ -38,6 +38,7 @@ still to do are listed there. A guide for reviewing the code is in [REVIEW-GUIDE
 | 6 | Draw only the cells and annunciators that changed, as soon as a frame is stable; rectangle `ClearScreen()` | Everything was redrawn every 35 ms, then a 6 ms wait | Change-to-screen 32.6 to 10.7 ms on average; read-back matches a full redraw pixel for pixel |
 | 7 | Files split by job (see the repository map in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md)); dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear fixed | Readability, and two latent bugs | Same results on the bench as Stage 6 |
 | after 7 | Boot: LT7680 set-up inside the panel's 120 ms wait, faster panel SPI. Capture: every whole frame decoded at once | Fastest start-up; the two-frame rule froze the display at 0.1 PLC and faster | First frame 0.14 s after reset; latency about 1 ms at up to 111 updates a second |
+| after 7 | Timing-adjust page shows the hardware: MCU CPUID, device ID, flash size, cycle counter; panel ID; LT7680 set-up result | Clone Blue Pills and other panels or controllers; the DWT cycle counter is new since Stage 7 | Bench board: genuine STM32F103 (rev X), counter OK, panel `no reply` (its data line isn't read back), LT7680 OK. See [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
 
 ## Test editions (ready-to-flash builds)
 
@@ -94,6 +95,6 @@ The raw captures (photos, videos, logs) are not in this repository; the numbers 
 - **Not visited:** TRIGGER and CONFIGURE sub-screens, MATH parameter screens, real error text and memory-card pages. (The meter's power-on screen, `Ver.` and `GPIB Addr`, is now drawn: the
   reworked boot is ready 0.14 s after reset and the meter sends that screen at 0.34 s.)
 - **`-O2` image:** run through the boot counter and the DCV reset; not yet through a full menu walk or a long display-off test.
-- **Rework, not yet checked by eye or by hand:** timing-adjust mode entered by holding DCV at power-up (all 6 sets), a menu
-  walk, the glyph self-test pages, and the 60-minute DISPLAY OFF test. The list is under "Deferred visual checks" in
-  [REWORK-PLAN.md](REWORK-PLAN.md).
+- **Rework, not yet checked by eye or by hand:** the 60-minute DISPLAY OFF test and the glyphs (with Hydron), a menu walk
+  and the glyph self-test pages. Flicker, colours and timing-adjust mode are checked. The list is under "Deferred
+  visual checks" in [REWORK-PLAN.md](REWORK-PLAN.md).

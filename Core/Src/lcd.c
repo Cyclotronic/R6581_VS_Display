@@ -67,6 +67,47 @@ void LCDWriteData(uint8_t data) {
 
 
 
+// Read 'bits' bits from the panel after a 9-bit command, with the SDA pin released and given the pull 'pull'.
+// The ST7701S drives SDA after the falling clock edge; the bit is sampled while the clock is high.
+static uint32_t LCD_ReadBits(uint8_t cmd, uint8_t bits, uint32_t pull) {
+	GPIO_InitTypeDef g = { .Pin = LCD_SDI_Pin, .Mode = GPIO_MODE_OUTPUT_PP, .Pull = GPIO_NOPULL, .Speed = GPIO_SPEED_FREQ_HIGH };
+	uint32_t v = 0;
+
+	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_RESET); // Pull CS low
+	DelayMicroseconds(LCD_CS_US);
+	LCD_SPI_Write((0 << 8) | cmd, 9);                           // D/CX = 0, command
+	g.Mode = GPIO_MODE_INPUT; g.Pull = pull;
+	HAL_GPIO_Init(LCD_SDI_Port, &g);                            // let the panel drive SDA
+	for (uint8_t i = 0; i < bits; i++) {
+		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_SET);
+		DelayMicroseconds(LCD_BIT_US);
+		v = (v << 1) | (HAL_GPIO_ReadPin(LCD_SDI_Port, LCD_SDI_Pin) == GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_RESET);
+		DelayMicroseconds(LCD_BIT_US);
+	}
+	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_SET);   // Pull CS high
+	g.Mode = GPIO_MODE_OUTPUT_PP; g.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(LCD_SDI_Port, &g);                            // SDA back to an output
+	DelayMicroseconds(LCD_CS_US);
+	return v;
+}
+
+// Panel identity for diagnostics (docs/BLUE-PILL-CHIPS.md): RDID1-3 (DAh, DBh, DCh), one byte each, read once with the
+// pin pulled up and once pulled down. If the two disagree, nothing drove the line; all ones or all zeros means the line is
+// held by something other than the panel. Either way the panel's SDA isn't read back on this board (or the panel doesn't
+// answer), and the result is 0xFFFFFFFF. On the bench board the line reads high with either pull.
+volatile uint32_t lcd_id = 0;
+uint32_t LCD_ReadID(void) {
+	uint32_t up = 0, down = 0;
+	for (uint8_t c = 0xDA; c <= 0xDC; c++) {
+		up = (up << 8) | LCD_ReadBits(c, 8, GPIO_PULLUP);
+		down = (down << 8) | LCD_ReadBits(c, 8, GPIO_PULLDOWN);
+	}
+	lcd_id = (up == down && up != 0x00FFFFFFu && up != 0) ? up : 0xFFFFFFFFu;
+	return lcd_id;
+}
+
+
 // delay used by the bit bang SPI: counts CPU cycles (DWT CYCCNT), which wraps cleanly; the old SysTick version could end early
 void DelayMicroseconds(uint16_t us) {
 	if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {

@@ -62,7 +62,8 @@ To see the end result against Ian's code file by file, compare `master` with the
 | `c26b634` | **Stage 7:** files split by job; dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear and `SetTimerDuration()` fixed; boot trimmed (boot screen off by default, 1 s settle wait to 20 ms) | mostly moves (see above); the fixes in `lcd.c`, `timer.c`, `stm32f1xx_it.c`; `main()` | `BOOT_DIAG_SHOWS=10`, `BOOT_SETTLE_MS=1000` | [Stage 7](REWORK-PLAN.md#stage-7-results-2026-10-30) |
 | `82baa04` | Timing-adjust mode chosen at 2.3 s in the main loop, not at start-up (a cold power-up left the display blank) | the `TIMING_MODE_CHECK_MS` block in the main loop | `TIMING_MODE_CHECK_MS` | Stage 7 results, "Cold power-up" |
 | `fdb2383` | Boot in 0.14 s: settings first, LT7680 set-up inside the panel's 120 ms Sleep Out wait, panel SPI at 1 µs. Capture decodes every new whole frame at once | `main()`; `*_Init_Start/_Finish` in `lcd.c`; `Capture_Poll` in `vfd_capture.c`; `Decode_Text`, `Main_Aux_Commit` in `vfd_decode.c` | `LCD_BIT_US=5 LCD_CS_US=10`, `CAPTURE_CONFIRM=1` | [After Stage 7](REWORK-PLAN.md#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30) |
-| (this commit) | Review guide, rework image in `Prebuilt/`, docs brought up to date, two stale comments in `vfd_capture.c` | comments only; the image is byte-identical to a build of `fdb2383` | | |
+| `08473bd` | Review guide, rework image in `Prebuilt/`, docs brought up to date, two stale comments in `vfd_capture.c` | comments only | | |
+| (next) | Hardware identity on the timing-adjust page: MCU CPUID, device ID, flash size, cycle counter; panel ID bytes; LT7680 set-up result. Notes on clone chips. Image rebuilt | `DrawChipId` in `settings.c`; `LCD_ReadID` in `lcd.c`; its call in `main()` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
 
 ## Where the code is now
 
@@ -109,10 +110,14 @@ These are the places where a mistake would matter most, or where the reasoning i
    STM32F103 it is always there. Some Blue Pill clone chips may not implement DWT; on one of those the counter would
    never advance and the panel set-up would hang at boot. The old SysTick delay didn't have that dependency (it had a
    wrap bug instead). If clone boards are expected, a fallback is cheap: check once that `CYCCNT` advances, and spin
-   a calibrated loop if it doesn't. Not done yet; a decision for review.
+   a calibrated loop if it doesn't. Not done; documented in [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md), with how to
+   check a board, and the timing-adjust page now shows whether the counter runs.
 8. **Timing-adjust mode at 2.3 s** (main loop, `TIMING_MODE_CHECK_MS`). The live display has been running for 2.3 s by
-   then; the block clears the screen and switches mode. This path is not yet exercised on the bench (see below).
-9. **The settings page** (`settings.c`). It is the last 1 KB page of flash, `0x0800FC00`. Any erase there must write
+   then; the block clears the screen and switches mode. Checked on the bench: holding DCV at power-up starts the
+   mode and each press steps to the next set.
+9. **The panel ID read at boot** (`LCD_ReadID` in `lcd.c`). It switches the panel's data pin (PB5) to an input for
+   24 clocks and back. Check that the pin is always restored to an output, and that chip select frames each read.
+10. **The settings page** (`settings.c`). It is the last 1 KB page of flash, `0x0800FC00`. Any erase there must write
    the timing set back; the boot-counter words share the page. Never do a full-chip erase when flashing.
 
 ## Behaviour changes a user will notice
@@ -188,16 +193,19 @@ counters over SWD), not by eye.
 
 ## Not yet verified
 
-From the [deferred visual checks](REWORK-PLAN.md#deferred-visual-checks), now that the panel can be seen:
+Checked by eye since the panel became visible: no flicker or colour faults, and timing-adjust mode starts when DCV is
+held at power-up and steps through the sets on each press.
 
-- **Timing-adjust mode:** hold DCV through power-up, step through all 6 timing sets, check the boot count survives.
-- **Panel quality:** no flicker or colour faults at the new pixel-clock PLL; backlight brightness and no PWM beat at
-  the new prescaler.
+Still to do, from the [deferred visual checks](REWORK-PLAN.md#deferred-visual-checks):
+
 - **60 minutes of DISPLAY OFF**, then on: ohm glyph and left column intact. This is the original corruption report;
-  Stage 1's soak says it is fixed, but it hasn't been seen fixed.
-- **Glyph self-test pages and a menu walk** compared with the earlier photos and log.
+  Stage 1's soak says it is fixed, but it hasn't been seen fixed. With Hydron.
+- **Glyphs** (ohm, sigma, ERROR) after long running, with Hydron; the glyph self-test pages and a menu walk compared
+  with the earlier photos and log.
 - **Fault line** readable when forced.
 - **Clone chips without DWT** (point 7 above): not tested; no such board here.
+- **The identity lines on the timing-adjust page** with no debugger attached (the device ID should read 0 on ST's
+  chip), and a panel ID from a board whose panel answers (Ian's board reads `no reply`).
 
 ## Left as Ian wrote it
 

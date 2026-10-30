@@ -37,7 +37,7 @@ The R6581T's vacuum-fluorescent display (VFD) is replaced by a 320 x 960 colour 
 
 | Item | Version used | Notes |
 | --- | --- | --- |
-| Blue Pill (STM32F103C8T6) | genuine or clone | The boot screen's "BluePill speed" number tells a genuine chip from a slower clone; see [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md). Jumpers BOOT0 and BOOT1 both at 0. |
+| Blue Pill (STM32F103C8T6) | genuine or clone | Clones mostly work, but see [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) for what to check; the timing-adjust page shows the chip's identity. Jumpers BOOT0 and BOOT1 both at 0. |
 | ST-Link V2 (or clone) | | SWD only: SWDIO, SWCLK, GND. **Leave 3V3 unconnected when the board is powered by the meter**; use the programmer's 3V3 only on a bare board on the bench. An ST-Link V3 needs a 3.3 V supply to the board (Ian's `_Programming.txt`). |
 | Arm GNU Toolchain (`arm-none-eabi`) | **14.2.Rel1** (GCC 14.2.1) | Download the `mingw-w64-i686-arm-none-eabi` zip from developer.arm.com (Arm GNU Toolchain Downloads), verify its SHA-256 against the page, unzip anywhere (no installer, no admin needed). The default location the build script looks in is `%LOCALAPPDATA%\arm-gnu-toolchain`. |
 | openocd | **xPack openocd 0.12.0-7** | `winget install xpack-dev-tools.openocd-xpack` (or download from xpack.dev). Needs the ST-Link driver. STM32CubeProgrammer works as an alternative for flashing only. |
