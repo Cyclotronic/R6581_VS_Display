@@ -12,6 +12,8 @@ Status (2026-10-30):
 - **Stage 2 done:** clocks verified in range, soak clean at 100 MHz.
 - **Stage 3 done:** the init sequence detects faults and recovers, and the live display starts 0.5 s sooner
   ([results](#stage-3-results-2026-10-30)).
+- **Stage 4 done:** whole, stable frames only. In 5 minutes no `?` reaches a redraw, against 5 or 6 for the current
+  capture ([results](#stage-4-results-2026-10-30)).
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 - Later stages not started.
 
@@ -405,6 +407,44 @@ Goal: only whole, stable frames reach the screen; the CPU is idle when nothing c
 - **Checks:**
   - menu walk, decoded-frame log: zero `?` over 10,000 frames at `-O0` and `-O2`
   - the 240 fps comparison for latency
+
+#### Stage 4 results (2026-10-30)
+
+What was built:
+
+- **Snapshot:** the EXTI handler copies the frame the DMA has just finished into `cap_frame[]` before it restarts the
+  DMA, and only if all 235 bytes arrived. Otherwise the frame is counted as short. This uses the DMA counter, not the
+  HAL completion callback.
+- **Stable frames only:** the main loop takes the snapshot with interrupts off for the 235-byte copy. It decodes only
+  when the same bytes have come twice in a row and differ from what is decoded already.
+- **Deleted:** the SPI2/DMA "pause" around drawing, and the SPI1 `SPE`/DMA3/NVIC toggling.
+- **Decoder:** `Main_Aux_R6581()` is a loop over the 47 characters. The out-of-bounds `main_display_debug` and the unused
+  `LCD_buffer_*` and `main_display_line` are gone. The bitmap text is behind `-DDECODE_DEBUG=1`, in a correctly sized
+  buffer.
+- **Options and tools:** `-DCAPTURE_LEGACY=1` restores the old capture for comparison. `tools/capture.py` reads the
+  counters.
+
+Bench, 5 minutes per build, meter on 100 mV DC, reading changing about 6 times a second:
+
+| Build | Frames/s | Frames cut short | Decodes/s | Decodes with `?` | Redraws with `?` | Main-loop passes/s |
+|---|---|---|---|---|---|---|
+| `CAPTURE_LEGACY=1`, -O0 | 83.4 | 8,478 (25%) | 157 | 18 | 5 of 8,822 | 157 |
+| `CAPTURE_LEGACY=1`, -O2 | 83.5 | 8,482 (25%) | 428 | 88 | 6 of 8,833 | 429 |
+| Stage 4, -O0 | 110.8 | 0 | 5.8 | 0 | 0 of 8,817 | 222,558 |
+| Stage 4, -O2 | 110.8 | 0 | 5.8 | 0 | 0 of 8,829 | 1,218,685 |
+
+Each Stage 4 run decoded about 34,000 frames, over the 10,000 the check asked for.
+
+- **The pause was worse than useless.** It stopped SPI2 in the middle of a frame, so a quarter of all frames were cut
+  short. The `?` came from decoding those torn buffers.
+- **Rejected frames:** every real change costs one rejected frame (its first sighting) before it is decoded. Stage 4
+  rejected 425 more than that in 311 s (2,214 rejected against 1,789 decodes), about 1.4 a second. These are frames
+  caught while the meter was updating its display, and the old path would have decoded them.
+- **Idle time:** with nothing to decode, the main loop now spins about 1.2 million times a second at -O2. That is the
+  time Stages 5 and 6 can use.
+
+Still to check: the 240 fps latency comparison needs the panel (see the deferred visual checks). The two-frame rule
+adds 9 ms at most.
 
 ### Stage 5: LT7680 bus layer
 

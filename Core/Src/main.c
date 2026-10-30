@@ -36,7 +36,6 @@
 #include <stdlib.h>		// required for float (soft FPU)
 
 /* Variables ---------------------------------------------------------*/
-static char main_display_debug[LINE1_LEN + 1]; // Main display debug string
 #define FONT_HEIGHT 7
 uint16_t dollarPosition = 0;
 _Bool oneVoltmode = false;
@@ -91,10 +90,13 @@ uint32_t LCD_HSPW = 10;
 uint32_t REFRESH_RATE = 60;
 char ADA_BUY[5] = "AdaF";
 
-// Buffers for each LCD graphical item
-char LCD_buffer_packets[128];  // For packet data
-char LCD_buffer_bitmaps[128];  // For decoded bitmap data
-char LCD_buffer_chars[128];    // For decoded characters
+#ifndef DECODE_DEBUG
+#define DECODE_DEBUG 0
+#endif
+#if DECODE_DEBUG
+// Bitmaps of the aux characters as text, for a debugger's live watch: "nn : [..x7]\n" per character
+char LCD_buffer_bitmaps[(LINE2_LEN) * 40 + 1];
+#endif
 
 char G[48];  // MAIN: G1 to G18, AUX: G19 to G47
 _Bool Annunc[19]; // Annunciators re-ordered, 18off, G1 to G18 in left-to-right order
@@ -152,6 +154,39 @@ volatile uint8_t SPI1_TX_completed_flag = 1;
 // Flag indicating finish of SPI start-up initialization
 volatile uint8_t Init_Completed_flag = 0;
 
+// ---- Capture (Stage 4 of docs/REWORK-PLAN.md) -------------------------------------------------------------------
+// The EXTI handler that restarts the SPI2 DMA every 9 ms first copies the frame the DMA has just finished into
+// cap_frame[] (only if all 235 bytes arrived). The main loop takes a copy with interrupts briefly off, and decodes a frame
+// only when it has seen the same bytes twice in a row and they differ from what is decoded already. So the decoder never
+// sees a frame that DMA is half-way through (the old source of the rare '?'), and does nothing while the display is
+// unchanged. CAPTURE_LEGACY=1 restores decoding rx_buffer on every main-loop pass and the capture pause around drawing.
+#ifndef CAPTURE_LEGACY
+#define CAPTURE_LEGACY 0
+#endif
+#define FRAME_BYTES (PACKET_WIDTH * PACKET_COUNT)
+volatile uint8_t cap_frame[FRAME_BYTES];
+volatile uint32_t cap_seq = 0;          // complete frames copied by the EXTI handler
+volatile uint32_t cap_short = 0;        // EXTI came before the DMA had the whole frame (frame dropped)
+volatile uint32_t cap_unstable = 0;     // frames that differed from the one before (a change, or a bad frame); not decoded
+volatile uint32_t cap_decodes = 0;      // frames decoded
+volatile uint32_t cap_unmatched = 0;    // decodes with at least one character not in the font table ('?')
+volatile uint32_t draws = 0;            // timed redraws (35 ms)
+volatile uint32_t draw_unmatched = 0;   // redraws with a '?' in G[]: what would reach the screen
+volatile uint32_t main_loops = 0;       // passes of the main loop (a measure of idle CPU time)
+static uint8_t cap_armed = 0;           // a DMA has been started, so the next EXTI ends a real frame
+
+void Capture_FrameEnd(void)
+{
+	if (cap_armed && __HAL_DMA_GET_COUNTER(hspi2.hdmarx) == 0) {
+		memcpy((void*)cap_frame, (const void*)rx_buffer, FRAME_BYTES);
+		cap_seq++;
+	}
+	else if (cap_armed) {
+		cap_short++;
+	}
+	cap_armed = 1;
+}
+
 #ifndef TIMING_PROBE
 #define TIMING_PROBE 0
 #endif
@@ -190,9 +225,6 @@ char setting_ADA_BUY[5];
 
 //******************************************************************************
 
-// Buffer to store the converted string representation of the main display line
-//char main_display_line[CHAR_COUNT + 1]; // +1 for null terminator
-static char main_display_line[CHAR_COUNT + 1]; // Static ensures scope is global within the file
 
 
 //SPI transmission finished interrupt callback
@@ -391,13 +423,13 @@ char BitmapToChar(const uint8_t* bitmap) {
 // 0 0 0 S26 S27 S28 S29 S30
 // 0 0 0 S31 S32 S33 S34 S35
 //
-void Packets_to_chars(void) {
+void Packets_to_chars(const volatile uint8_t* buf) {
 	for (int i = 0; i < PACKET_COUNT; i++) {
-		uint8_t d0 = rx_buffer[i * PACKET_WIDTH + 0];
-		uint8_t d1 = rx_buffer[i * PACKET_WIDTH + 1];
-		uint8_t d2 = rx_buffer[i * PACKET_WIDTH + 2];
-		uint8_t d3 = rx_buffer[i * PACKET_WIDTH + 3];
-		uint8_t d4 = rx_buffer[i * PACKET_WIDTH + 4];
+		uint8_t d0 = buf[i * PACKET_WIDTH + 0];
+		uint8_t d1 = buf[i * PACKET_WIDTH + 1];
+		uint8_t d2 = buf[i * PACKET_WIDTH + 2];
+		uint8_t d3 = buf[i * PACKET_WIDTH + 3];
+		uint8_t d4 = buf[i * PACKET_WIDTH + 4];
 
 		chars[Reorder[i]][0] = 0x1F & InverseByte((d1 << 4) | ((d2 & 0x80) >> 4));
 		chars[Reorder[i]][1] = 0x1F & InverseByte((d0 << 7) | ((d1 & 0xF0) >> 1));
@@ -413,8 +445,6 @@ void Packets_to_chars(void) {
 			AnnuncTemp[i] = flags[Reorder[i]];
 		}
 	}
-	// Null-terminate the main display line string
-	main_display_line[LINE1_LEN] = '\0';
 }
 
 
@@ -444,90 +474,55 @@ void ReorderAnnunciators(void) {
 
 
 void Main_Aux_R6581(void) {
-	// Clear LCD buffers
-	memset(LCD_buffer_packets, 0, sizeof(LCD_buffer_packets));
-	memset(LCD_buffer_bitmaps, 0, sizeof(LCD_buffer_bitmaps));
-	memset(LCD_buffer_chars, 0, sizeof(LCD_buffer_chars));
+	uint8_t unmatched = 0;
 
 	ReorderAnnunciators();  // re-order the annunciators so Annunnciator[1] is above G1
-	//char annunciator_debug[256] = "Annunciators: "; // Buffer for annunciator state debug
 
-	for (int i = 0; i <= 17; i++) {      // G1 to G18
-		// Use already-decoded data from Packets_to_chars
-		uint8_t* bitmap = chars[i]; // Get the bitmap for this character
-		char ascii_char = BitmapToChar(bitmap); // Convert bitmap to ASCII character
-
-		// MAIN Update individual variables G1 to G18
-		if (i == 0) G[1] = ascii_char;
-		else if (i == 1) G[2] = ascii_char;
-		else if (i == 2) G[3] = ascii_char;
-		else if (i == 3) G[4] = ascii_char;
-		else if (i == 4) G[5] = ascii_char;
-		else if (i == 5) G[6] = ascii_char;
-		else if (i == 6) G[7] = ascii_char;
-		else if (i == 7) G[8] = ascii_char;
-		else if (i == 8) G[9] = ascii_char;
-		else if (i == 9) G[10] = ascii_char;
-		else if (i == 10) G[11] = ascii_char;
-		else if (i == 11) G[12] = ascii_char;
-		else if (i == 12) G[13] = ascii_char;
-		else if (i == 13) G[14] = ascii_char;
-		else if (i == 14) G[15] = ascii_char;
-		else if (i == 15) G[16] = ascii_char;
-		else if (i == 16) G[17] = ascii_char;
-		else if (i == 17) G[18] = ascii_char;
+	for (int i = 0; i < CHAR_COUNT; i++) {      // G1 to G18 MAIN, G19 to G47 AUX
+		G[i + 1] = BitmapToChar(chars[i]);
+		if (G[i + 1] == '?') unmatched = 1;
 	}
+	cap_decodes++;
+	if (unmatched) cap_unmatched++;
 
-	// Null-terminate the Main display debug string
-	main_display_debug[LINE1_LEN] = '\0';
-
-	for (int i = 18; i <= 46; i++) {      // G19 to G47
-		// Use already-decoded data from Packets_to_chars
-		uint8_t* bitmap = chars[i]; // Get the bitmap for character
-		char ascii_char = BitmapToChar(bitmap); // Convert bitmap to ASCII character
-
-		// AUX Update individual variables
-		if (i == 18) G[19] = ascii_char;
-		else if (i == 19) G[20] = ascii_char;
-		else if (i == 20) G[21] = ascii_char;
-		else if (i == 21) G[22] = ascii_char;
-		else if (i == 22) G[23] = ascii_char;
-		else if (i == 23) G[24] = ascii_char;
-		else if (i == 24) G[25] = ascii_char;
-		else if (i == 25) G[26] = ascii_char;
-		else if (i == 26) G[27] = ascii_char;
-		else if (i == 27) G[28] = ascii_char;
-		else if (i == 28) G[29] = ascii_char;
-		else if (i == 29) G[30] = ascii_char;
-		else if (i == 30) G[31] = ascii_char;
-		else if (i == 31) G[32] = ascii_char;
-		else if (i == 32) G[33] = ascii_char;
-		else if (i == 33) G[34] = ascii_char;
-		else if (i == 34) G[35] = ascii_char;
-		else if (i == 35) G[36] = ascii_char;
-		else if (i == 36) G[37] = ascii_char;
-		else if (i == 37) G[38] = ascii_char;
-		else if (i == 38) G[39] = ascii_char;
-		else if (i == 39) G[40] = ascii_char;
-		else if (i == 40) G[41] = ascii_char;
-		else if (i == 41) G[42] = ascii_char;
-		else if (i == 42) G[43] = ascii_char;
-		else if (i == 43) G[44] = ascii_char;
-		else if (i == 44) G[45] = ascii_char;
-		else if (i == 45) G[46] = ascii_char;
-		else if (i == 46) G[47] = ascii_char;
-
-		// Append AUX to debug buffers for additional debugging
-		snprintf(LCD_buffer_bitmaps + strlen(LCD_buffer_bitmaps),
-			sizeof(LCD_buffer_bitmaps) - strlen(LCD_buffer_bitmaps),
-			"%d : [%02X, %02X, %02X, %02X, %02X, %02X, %02X]\n",
-			i, bitmap[0], bitmap[1], bitmap[2], bitmap[3],
-			bitmap[4], bitmap[5], bitmap[6]);
+#if DECODE_DEBUG
+	LCD_buffer_bitmaps[0] = '\0';
+	for (int i = LINE1_LEN, n = 0; i < CHAR_COUNT; i++) {
+		const uint8_t* b = chars[i];
+		n += snprintf(LCD_buffer_bitmaps + n, sizeof(LCD_buffer_bitmaps) - n,
+			"%d : [%02X, %02X, %02X, %02X, %02X, %02X, %02X]\n", i, b[0], b[1], b[2], b[3], b[4], b[5], b[6]);
+		if (n >= (int)sizeof(LCD_buffer_bitmaps)) break;
 	}
-
-	// Null-terminate the Aux display debug string
-	main_display_debug[LINE2_LEN] = '\0';
+#endif
 }
+
+#if !CAPTURE_LEGACY
+// Decode the newest captured frame once it has been seen twice in a row (see Capture_FrameEnd)
+static void Capture_Poll(void)
+{
+	static uint8_t now[FRAME_BYTES], prev[FRAME_BYTES], shown[FRAME_BYTES];
+	static uint32_t seen = 0;
+	static uint8_t have_prev = 0, have_shown = 0;
+
+	if (cap_seq == seen) return;
+	__disable_irq();
+	memcpy(now, (const void*)cap_frame, FRAME_BYTES);
+	seen = cap_seq;
+	__enable_irq();
+
+	if (!have_prev || memcmp(now, prev, FRAME_BYTES) != 0) {   // new or changed: wait for the same bytes again
+		if (have_prev) cap_unstable++;
+		memcpy(prev, now, FRAME_BYTES);
+		have_prev = 1;
+		return;
+	}
+	if (have_shown && memcmp(now, shown, FRAME_BYTES) == 0) return;   // already decoded
+	memcpy(shown, now, FRAME_BYTES);
+	have_shown = 1;
+	Packets_to_chars(now);
+	Main_Aux_R6581();
+}
+#endif
 
 
 //************************************************************************************************************************************************************
@@ -744,20 +739,25 @@ int main(void) {
 		//char inputString[] = "123.456";
 		//test15 = atof(inputString);
 
+		main_loops++;
+#if TIMING_PROBE
+		tp_main_loops++;
+#endif
+#if CAPTURE_LEGACY
 		while (SPI1->SR & SPI_SR_BSY);					// Wait until any ongoing TFT SPI transfers are complete
 		SPI1->CR1 &= ~SPI_CR1_SPE;						// Disable the TFT SPI peripheral
 		DMA1_Channel3->CCR &= ~DMA_CCR_EN;				// Disable the TFT SPI DMA channels
 		NVIC_DisableIRQ(SPI1_IRQn);						// Disable TFT SPI NVIC interrupts to prevent any inadvertent triggering
 
-#if TIMING_PROBE
-		tp_main_loops++;
-#endif
-		Packets_to_chars();         // Convert VFD packets from R6581 to characters
+		Packets_to_chars(rx_buffer);	// Convert VFD packets from R6581 to characters
 		Main_Aux_R6581();           // Get R6581 VFD drive data
 
 		DMA1_Channel3->CCR |= DMA_CCR_EN;				// Re-enable the TFT DMA channel
 		SPI1->CR1 |= SPI_CR1_SPE;						// Re-enable the TFT SPI peripheral by setting its SPE bit
 		NVIC_EnableIRQ(SPI1_IRQn);						// Re-enable the TFT SPI NVIC interrupts
+#else
+		Capture_Poll();					// decode a new, stable VFD frame if there is one
+#endif
 
 		task_ready = 1; // Mark tasks as complete so the timer driven code is allowed to run again
 
@@ -779,6 +779,9 @@ int main(void) {
 			
 			if (timingModsOnBoot == false) {
 
+				draws++;
+				if (memchr(&G[1], '?', CHAR_COUNT)) draw_unmatched++;
+#if CAPTURE_LEGACY
 				// Wait for SPI2 to finish any ongoing transfers
 				while (SPI2->SR & SPI_SR_BSY);
 
@@ -793,6 +796,7 @@ int main(void) {
 				NVIC_DisableIRQ(SPI2_IRQn);
 				NVIC_DisableIRQ(DMA1_Channel4_IRQn);
 				NVIC_DisableIRQ(DMA1_Channel5_IRQn);
+#endif
 
 				HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin); // Test LED toggle
 #if TIMING_PROBE
@@ -859,6 +863,7 @@ int main(void) {
 #if TIMING_PROBE
 				tp_total_last = DWT->CYCCNT - tp_t0; if (tp_total_last > tp_total_max) tp_total_max = tp_total_last; tp_blocks++;
 #endif
+#if CAPTURE_LEGACY
 				// Resume SPI2 capture:
 				// Re-enable DMA channels first
 				DMA1_Channel4->CCR |= DMA_CCR_EN;
@@ -871,6 +876,7 @@ int main(void) {
 				NVIC_EnableIRQ(SPI2_IRQn);
 				NVIC_EnableIRQ(DMA1_Channel4_IRQn);
 				NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+#endif
 
 			} else {
 

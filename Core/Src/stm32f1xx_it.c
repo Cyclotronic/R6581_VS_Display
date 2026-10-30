@@ -43,7 +43,8 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
 extern uint8_t rx_buffer[PACKET_WIDTH*PACKET_COUNT];
-extern uint8_t Init_Completed_flag;
+extern volatile uint8_t Init_Completed_flag;
+void Capture_FrameEnd(void);            // main.c: keep the frame the DMA just finished (Stage 4)
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -254,6 +255,7 @@ void EXTI15_10_IRQHandler(void)
 // to load "1" into the chain of shift registers U5-U6. The edge of this signal is used as an 
 // interrupt source, which starts reading 47 packets of 5 bytes each (interrupt frequency ~111 Hz)
   if (Init_Completed_flag) {
+      Capture_FrameEnd();                   // copy the finished frame before the DMA restarts over it
       HAL_SPI_DMAStop(&hspi2);              // Used to ensure robustness when failures occur in SPI transfers.
       HAL_SPI_Abort(&hspi2);                // ---- "" ----
       __HAL_RCC_SPI2_FORCE_RESET();         // ---- "" ----

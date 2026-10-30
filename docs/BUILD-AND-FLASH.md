@@ -172,6 +172,8 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | `LT_CLOCKS_LEGACY=1` | 0 | Ian's clocks (MCLK = CCLK = 2 x PCLK, PCLK PLL VCO below its 100 MHz minimum); only for A/B comparison. See Stage 2 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `LT_INIT_LEGACY=1` | 0 | Ian's fixed init delays (100 ms reset pulse and wait, 5-100 ms between register groups) instead of polling; for boot-time comparison only. See Stage 3 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `LT_FAULT_TEST=n` | 0 | Bench test: holds the LT7680 in reset for the first n hardware resets, to exercise the no-reply retry (test LED blinks, then recovers) |
+| `CAPTURE_LEGACY=1` | 0 | Ian's capture: decode `rx_buffer` on every main-loop pass while DMA writes it, and the (ineffective) capture pause around drawing; for A/B comparison. See Stage 4 in [REWORK-PLAN.md](REWORK-PLAN.md) |
+| `DECODE_DEBUG=1` | 0 | Keeps the aux-character bitmaps as text in `LCD_buffer_bitmaps[]` for a debugger's live watch |
 | `LT_REGDUMP=1` | 0 | Reads the LT7680 PLL, panel and SDRAM registers (both SDRAM register banks) into `lt_regdump[]` after init, and again on request; decode with `tools/regdump.py`. Stage 0 of [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `OPT=0/2/s` (environment, not a -D) | 0 | Optimisation level |
 
