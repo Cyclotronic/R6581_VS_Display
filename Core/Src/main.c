@@ -56,6 +56,7 @@ volatile uint32_t dbg_loop_per_sec = 0;
 volatile uint32_t dbg_loop_last_ms = 0;
 volatile uint32_t dbg_loop_test_done = 0;
 volatile uint32_t boot_ready_ms = 0;	// HAL tick when the live loop starts (boot time, Stage 3 of docs/REWORK-PLAN.md)
+volatile uint8_t boot_poweron = 0;		// 1 if this boot was a power-on reset (the panel then gets its reset timing)
 volatile uint32_t boot_sleepout_ms = 0;	// ... when the panel set-up reached Sleep Out (its first half is done)
 volatile uint32_t boot_lt_ms = 0;		// ... when the LT7680 set-up has finished
 volatile uint32_t boot_panel_ms = 0;	// ... when the TFT panel (ST7701S) set-up has finished
@@ -169,10 +170,19 @@ int main(void) {
 	if (strcmp(ADA_BUY, "AdaF") != 0 && strcmp(ADA_BUY, "BuyD") != 0) strcpy(ADA_BUY, "AdaF");	// default panel
 	uint8_t buyDisplay = (strcmp(ADA_BUY, "BuyD") == 0);
 
-	// Panel (ST7701S) set-up, first half: up to Sleep Out. The panel then needs LCD_SLEEPOUT_MS before its next command,
-	// and the LT7680 set-up runs in that time instead of after it.
+	// Panel (ST7701S) set-up, first half, then Sleep Out. The panel then needs LCD_SLEEPOUT_MS before its next command,
+	// and the LT7680 set-up runs in that time instead of after it. After a power-on reset the panel has just come out of
+	// its own reset, so its first command waits LCD_POWERON_CMD_MS and Sleep Out waits LCD_POWERON_SLPOUT_MS (lcd.h);
+	// the LT7680 set-up runs first instead. On a warm reset the panel stayed powered: no wait.
+	uint8_t poweron = __HAL_RCC_GET_FLAG(RCC_FLAG_PORRST) != RESET;
+	__HAL_RCC_CLEAR_RESET_FLAGS();				// so the next warm reset doesn't look like a power-on
+	boot_poweron = poweron;
+	if (poweron) while (HAL_GetTick() < LCD_POWERON_CMD_MS) { }
 	if (buyDisplay) BuyDisplay_Init_Start(); else AdaFruit_Init_Start();
-	boot_sleepout_ms = HAL_GetTick();
+	if (!poweron) {
+		LCD_SleepOut();
+		boot_sleepout_ms = HAL_GetTick();
+	}
 
 	while (HAL_GetTick() < BOOT_SETTLE_MS) { }	// the LT7680 still gets BOOT_SETTLE_MS from reset (lt7680.h)
 
@@ -197,6 +207,12 @@ int main(void) {
 	SetTimerDuration(35);			// 35 ms timed action set
 
 	ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
+
+	if (poweron) {
+		while (HAL_GetTick() < LCD_POWERON_SLPOUT_MS) { }
+		LCD_SleepOut();
+		boot_sleepout_ms = HAL_GetTick();
+	}
 
 	// Panel set-up, second half, once LCD_SLEEPOUT_MS have passed since Sleep Out
 	while (HAL_GetTick() - boot_sleepout_ms < LCD_SLEEPOUT_MS) { }

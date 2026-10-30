@@ -201,8 +201,17 @@ void Settings_Load(void) {
 	boot_REFRESH_RATE = setting_REFRESH_RATE;
 	strcpy(boot_ADA_BUY, setting_ADA_BUY);
 
-	// Check if loaded values are ok
-	if (setting_LCD_VBPD < 5 || setting_LCD_VBPD > 50) {
+	// Check if loaded values are ok. Every field is checked: the page is written one word at a time after an erase, so a
+	// power cut part-way through a save can leave a good first word and erased (0xFFFFFFFF) words after it, and since the
+	// rework the stored set also programs the LT7680's pixel clock at boot.
+	if (setting_LCD_VBPD < 5 || setting_LCD_VBPD > 50
+		|| setting_LCD_VFPD < 1 || setting_LCD_VFPD > 50
+		|| setting_LCD_VSPW < 1 || setting_LCD_VSPW > 20
+		|| setting_LCD_HBPD < 1 || setting_LCD_HBPD > 200
+		|| setting_LCD_HFPD < 1 || setting_LCD_HFPD > 200
+		|| setting_LCD_HSPW < 1 || setting_LCD_HSPW > 100
+		|| setting_REFRESH_RATE < 30 || setting_REFRESH_RATE > 120
+		|| (strcmp(setting_ADA_BUY, "AdaF") != 0 && strcmp(setting_ADA_BUY, "BuyD") != 0)) {
 
 		// Assign default values
 		setting_LCD_VBPD = LCD_VBPD;
@@ -341,11 +350,11 @@ void TimingAdjust_Poll(void) {
 				strcpy(ADA_BUY, setting_ADA_BUY);
 
 				// run startup subs again to apply new settings
-				AdaFruit_Init();
+				if (strcmp(ADA_BUY, "BuyD") == 0) BuyDisplay_Init(); else AdaFruit_Init();	// the selected set's panel
 				//HAL_Delay(5);
 				Delay_NonBlocking(5);  // Wait ms in a non-blocking way
 				LT7680_PLL_Initial_LT();
-				SDRAM_SetRefresh_LT();		// the memory clock follows PCLK, so the refresh interval must too
+				SDRAM_SetRefresh_LT();		// keeps the refresh interval matched to the memory clock after the PLLs are set again
 				//HAL_Delay(5);
 				Delay_NonBlocking(5);  // Wait ms in a non-blocking way
 				LCD_Horizontal_Non_Display_LT(LCD_HBPD);  // Horizontal Back Porch

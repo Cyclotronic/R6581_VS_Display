@@ -21,16 +21,16 @@ measured on a clone.
 
 In order of how badly it would show.
 
-1. **Cycle counter (DWT `CYCCNT`): the panel set-up would hang.** Since the rework (Stage 7), `DelayMicroseconds()` in
-   `lcd.c` counts CPU cycles on the Cortex-M3's DWT cycle counter. It times the bit-banged SPI that sets up the ST7701S
-   panel. The counter is an optional part of a Cortex-M3. Every ST STM32F103 has it, but no clone was checked here.
-   If a chip lacks it, the counter never advances: the first delay never ends, and the board hangs at boot with a dark
-   panel and the backlight off, because the panel set-up starts before the LT7680's. Ian's old SysTick delay
-   didn't need the counter. (It had a bug of its own instead: a delay could end early.)
-   - **To check a board:** read `DWT_CTRL` (`0xE0001000`) over SWD. Bit 25 (`NOCYCCNT`) must be 0. Then enable the
-     counter and read `0xE0001004` twice: the value must change. The openocd lines are below.
-   - **If a clone lacks it:** add a fallback to `DelayMicroseconds()` that checks once whether the counter advances and
-     otherwise spins a calibrated loop. That isn't in the code, because no board here needs it.
+1. **Cycle counter (DWT `CYCCNT`): handled by a fallback.** Since the rework (Stage 7), `DelayMicroseconds()` in
+   `lcd.c` counts CPU cycles on the Cortex-M3's DWT cycle counter. It times the bit-banged SPI that sets up the
+   ST7701S panel. The counter is an optional part of a Cortex-M3. Every ST STM32F103 has it, but no clone was checked
+   here. Without it the first delay would never end, and the board would hang at boot with a dark panel. So the
+   first call checks that the counter runs. If it doesn't, the delay counts SysTick instead, which HAL runs from the
+   CPU clock. Ian's original delay also used SysTick, but could end early.
+   - **Tested** on the bench board by forcing the fallback (`-DDELAY_FORCE_SYSTICK=1`): the panel came up as normal.
+   - **To check a board:** the timing-adjust page shows `CYCCNT OK` or `NONE`. Or read `DWT_CTRL` (`0xE0001000`)
+     over SWD: bit 25 (`NOCYCCNT`) must be 0; then enable the counter and read `0xE0001004` twice, and the value must
+     change. The openocd lines are below.
 2. **openocd refuses the chip.** CKS32 and similar clones report a different SWD ID (`0x2ba01477` instead of ST's
    `0x1ba01477`). openocd then stops with "UNEXPECTED idcode". Add `-c "set CPUTAPID 0x2ba01477"` before
    `-f target/stm32f1x.cfg`. This affects flashing and every SWD tool in `docs/tools`, not the firmware.
@@ -86,9 +86,10 @@ If the panel doesn't answer at all, the field reads `no reply`.
 **The LT7680 has no ID register.** Every LT768x variant has the same 128 Mb of SDRAM, so memory size doesn't tell
 them apart either. What the page can show is whether the controller answered and set itself up cleanly.
 
-**The panel read** costs about 0.2 ms at boot. The data pin (PB5) is released, and each byte is read twice: once with
-the STM32's pull-up and once with its pull-down. If the two differ, nothing drove the line. `lcd_id` and `lcd_pwr` hold
-the same values for SWD (`lcd_id` = `0xFFFFFFFF` if the panel didn't answer).
+**The panel read** costs well under a millisecond at boot: four bytes at 5 µs per half-clock. The data pin (PB5) is
+released as a plain input, with no pull. A power byte of `00` or `FF` means the panel didn't answer: a line nobody
+drives keeps the command's last bit, 0. `lcd_id` and `lcd_pwr` hold the same values for SWD (`0xFFFFFFFF` and `0xFFFF`
+if the panel didn't answer).
 
 **The panel's ID bytes don't identify it on this hardware.** The ST7701S datasheet leaves RDID1-3 for the module maker
 to program ("RDID1 ... identifies the LCD module's manufacturer"; default `xxh`). BuyDisplay's ER-TFT4.58-1 leaves them
@@ -100,9 +101,23 @@ The path was checked end to end on the bench board, the first time it read `FFFF
 - **At idle, PB5 follows the STM32's own pull** (low with the pull-down, high with the pull-up), so nothing else holds
   the line.
 - **During the read the panel drives it:** the power-mode byte reads `9C`, the expected value.
-- **The driver board passes the line both ways.** BuyDisplay's ER-PCBA5981-1 lists header pin 18 (`LCD_DIN`) as an input
-  only, and its datasheet has no schematic. But the outline drawing shows no buffer: only the LT7680, a regulator and the
-  flash chip. The LT7680 has no panel-SPI pins of its own.
+- **But only weakly, through a high resistance.** The power byte, read with each of the STM32's input settings at four
+  clock speeds (half-cycle):
+
+  | Input | 1 µs | 2 µs | 5 µs | 20 µs |
+  |---|---|---|---|---|
+  | pull-down (about 40 kΩ) | `9C` | `00` | `00` | `00` |
+  | no pull | `9C` | `9C` | `9C` | `9C` |
+  | pull-up (about 40 kΩ) | `FF` / `DF` | `FF` | `FF` | `FF` |
+
+  The panel's signal loses to either of the STM32's pulls as soon as the line has time to settle, so it reaches PB5
+  through much more than 40 kΩ. With no pull it reads correctly at every speed, so that is how the firmware reads it.
+  A first version compared a pulled-up and a pulled-down read. It worked by luck of timing at 1 µs, and failed after an
+  unrelated change.
+- **Where the resistance is isn't known.** BuyDisplay's ER-PCBA5981-1 lists header pin 18 (`LCD_DIN`) as an input
+  only, and its datasheet has no schematic. The outline drawing shows no buffer: only the LT7680, a regulator and the
+  flash chip. The LT7680 has no panel-SPI pins of its own. A series resistor on that board, meant for the one-way
+  set-up path, would fit what was measured.
 
 **What the datasheets let you configure.**
 

@@ -67,23 +67,29 @@ void LCDWriteData(uint8_t data) {
 
 
 
-// Read 'bits' bits from the panel after a 9-bit command, with the SDA pin released and given the pull 'pull'.
-// The ST7701S drives SDA after the falling clock edge; the bit is sampled while the clock is high.
-static uint32_t LCD_ReadBits(uint8_t cmd, uint8_t bits, uint32_t pull) {
+// Read 8 bits from the panel after a 9-bit command, with the SDA pin released as a plain input (no pull). The ST7701S
+// drives SDA after the falling clock edge; the bit is sampled while the clock is high. On the bench the panel's output
+// reaches PB5 only through a high resistance (the driver board's path): with the STM32's 40 kOhm pull-up its 0 bits read
+// as 1, and with the pull-down its 1 bits read as 0 from a 2 us half-cycle up. With no pull the power byte reads 9Ch at
+// every speed tried (1-20 us), so reads use no pull and LCD_READ_US per half-cycle.
+#ifndef LCD_READ_US
+#define LCD_READ_US 5
+#endif
+static uint8_t LCD_ReadByte(uint8_t cmd) {
 	GPIO_InitTypeDef g = { .Pin = LCD_SDI_Pin, .Mode = GPIO_MODE_OUTPUT_PP, .Pull = GPIO_NOPULL, .Speed = GPIO_SPEED_FREQ_HIGH };
-	uint32_t v = 0;
+	uint8_t v = 0;
 
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_RESET); // Pull CS low
 	DelayMicroseconds(LCD_CS_US);
 	LCD_SPI_Write((0 << 8) | cmd, 9);                           // D/CX = 0, command
-	g.Mode = GPIO_MODE_INPUT; g.Pull = pull;
+	g.Mode = GPIO_MODE_INPUT; g.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(LCD_SDI_Port, &g);                            // let the panel drive SDA
-	for (uint8_t i = 0; i < bits; i++) {
+	for (uint8_t i = 0; i < 8; i++) {
 		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_SET);
-		DelayMicroseconds(LCD_BIT_US);
+		DelayMicroseconds(LCD_READ_US);
 		v = (v << 1) | (HAL_GPIO_ReadPin(LCD_SDI_Port, LCD_SDI_Pin) == GPIO_PIN_SET);
 		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_RESET);
-		DelayMicroseconds(LCD_BIT_US);
+		DelayMicroseconds(LCD_READ_US);
 	}
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_SET);   // Pull CS high
 	g.Mode = GPIO_MODE_OUTPUT_PP; g.Pull = GPIO_NOPULL;
@@ -92,41 +98,57 @@ static uint32_t LCD_ReadBits(uint8_t cmd, uint8_t bits, uint32_t pull) {
 	return v;
 }
 
-// Panel identity for diagnostics (docs/BLUE-PILL-CHIPS.md). Each byte is read once with the pin pulled up and once pulled
-// down; if the two disagree, nothing drove the line. First RDDPM (0Ah, power mode), whose value is known once the panel is
-// set up (9Ch: booster on, sleep out, normal mode, display on), shows whether the panel answers at all. Then RDID1-3 (DAh,
-// DBh, DCh): one-time-programmable bytes the module maker may have set (unprogrammed they can read FFh).
-// lcd_id = 0x00ID1ID2ID3, or 0xFFFFFFFF if the panel doesn't answer; lcd_pwr = the 0Ah byte (0xFFFF if not driven).
+// Panel identity for diagnostics (docs/BLUE-PILL-CHIPS.md). First RDDPM (0Ah, power mode): once the panel is set up it
+// reads 9Ch (booster on, sleep out, normal mode, display on). A line nothing drives keeps the command's last bit (0) and
+// reads 00h, and all ones means no answer either, so 00h or FFh means the panel doesn't answer. Then RDID1-3 (DAh, DBh, DCh): one-time-programmable bytes the module
+// maker may have set (unprogrammed they read FFh).
+// lcd_pwr = the 0Ah byte, or 0xFFFF if the panel doesn't answer; lcd_id = 0x00ID1ID2ID3, or 0xFFFFFFFF if it doesn't.
 volatile uint32_t lcd_id = 0;
 volatile uint16_t lcd_pwr = 0;
-static int16_t LCD_ReadByte(uint8_t cmd) {
-	uint8_t up = LCD_ReadBits(cmd, 8, GPIO_PULLUP);
-	uint8_t down = LCD_ReadBits(cmd, 8, GPIO_PULLDOWN);
-	return up == down ? up : -1;
-}
 uint32_t LCD_ReadID(void) {
-	int16_t pwr = LCD_ReadByte(0x0A);
-	lcd_pwr = pwr < 0 ? 0xFFFF : (uint16_t)pwr;
-	uint32_t id = 0;
-	for (uint8_t c = 0xDA; c <= 0xDC; c++) {
-		int16_t b = LCD_ReadByte(c);
-		if (b < 0) { id = 0xFFFFFFFFu; break; }
-		id = (id << 8) | (uint8_t)b;
+	uint8_t pwr = LCD_ReadByte(0x0A);
+	if (pwr == 0x00 || pwr == 0xFF) {
+		lcd_pwr = 0xFFFF;
+		lcd_id = 0xFFFFFFFFu;
+		return lcd_id;
 	}
-	lcd_id = (pwr < 0 || pwr == 0xFF || pwr == 0x00) ? 0xFFFFFFFFu : id;
+	lcd_pwr = pwr;
+	uint32_t id = 0;
+	for (uint8_t c = 0xDA; c <= 0xDC; c++) id = (id << 8) | LCD_ReadByte(c);
+	lcd_id = id;
 	return lcd_id;
 }
 
 
-// delay used by the bit bang SPI: counts CPU cycles (DWT CYCCNT), which wraps cleanly; the old SysTick version could end early
+// delay used by the bit bang SPI: counts CPU cycles on the DWT cycle counter, which wraps cleanly. The counter is optional
+// in a Cortex-M3 and a clone chip may lack it (docs/BLUE-PILL-CHIPS.md), so the first call checks that it runs; if not,
+// the delay counts SysTick instead (HAL runs it from the CPU clock), adding up its down-counts across each reload.
+// (Ian's SysTick version could end early: its wrap check could never be true.)
+#ifndef DELAY_FORCE_SYSTICK
+#define DELAY_FORCE_SYSTICK 0			// bench: 1 = use the SysTick fallback even where the cycle counter runs
+#endif
+static uint8_t delay_cyc = DELAY_FORCE_SYSTICK ? 2 : 0;	// 0 = not checked yet, 1 = DWT cycle counter, 2 = SysTick
 void DelayMicroseconds(uint16_t us) {
-	if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {
+	uint32_t ticks = (SystemCoreClock / 1000000u) * us;
+	if (delay_cyc == 0) {
 		CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
 		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+		uint32_t c0 = DWT->CYCCNT;
+		__NOP(); __NOP(); __NOP(); __NOP();
+		delay_cyc = (!(DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) && DWT->CYCCNT != c0) ? 1 : 2;
 	}
-	uint32_t start = DWT->CYCCNT;
-	uint32_t ticks = (SystemCoreClock / 1000000u) * us;
-	while ((DWT->CYCCNT - start) < ticks) { }
+	if (delay_cyc == 1) {
+		uint32_t start = DWT->CYCCNT;
+		while ((DWT->CYCCNT - start) < ticks) { }
+	}
+	else {
+		uint32_t reload = SysTick->LOAD + 1, prev = SysTick->VAL, elapsed = 0;
+		while (elapsed < ticks) {
+			uint32_t now = SysTick->VAL;
+			elapsed += (prev >= now) ? prev - now : prev + reload - now;
+			prev = now;
+		}
+	}
 }
 
 
@@ -176,7 +198,7 @@ void LCD_Hor_Ver_Timing() {
 }
 
 
-// First half of the panel set-up, up to and including Sleep Out (11h)
+// First half of the panel set-up, up to Sleep Out (11h), which the caller sends with LCD_SleepOut()
 void AdaFruit_Init_Start() {
 
 	//ST7701S+AUO4.58
@@ -429,8 +451,6 @@ void AdaFruit_Init_Start() {
 	LCDWriteData(0x00);
 	LCDWriteData(0x00);
 	LCDWriteData(0x00);
-
-	LCDWriteRegister(0x11);
 }
 
 // Second half: after LCD_SLEEPOUT_MS from Sleep Out (the caller waits, and may do other work meanwhile)
@@ -448,14 +468,21 @@ void AdaFruit_Init_Finish() {
 	LCDWriteRegister(0x29);
 }
 
+// SLPOUT (11h): Sleep Out. The ST7701S needs LCD_SLEEPOUT_MS after it before the next command, and must not get it
+// within 120 ms of coming out of reset (datasheet, reset timing note 7)
+void LCD_SleepOut(void) {
+	LCDWriteRegister(0x11);
+}
+
 void AdaFruit_Init() {
 	AdaFruit_Init_Start();
+	LCD_SleepOut();
 	HAL_Delay(LCD_SLEEPOUT_MS);
 	AdaFruit_Init_Finish();
 }
 
 
-// First half of the panel set-up, up to and including Sleep Out (11h)
+// First half of the panel set-up, up to Sleep Out (11h), which the caller sends with LCD_SleepOut()
 void BuyDisplay_Init_Start() {
 
 	// Refer to ST7701S datasheet and your TFT LCD datasheet in order to make teh following settings
@@ -722,8 +749,6 @@ void BuyDisplay_Init_Start() {
 	LCDWriteData(0x00);
 	LCDWriteData(0x00);
 	LCDWriteData(0x00);	//00000b
-
-	LCDWriteRegister(0x11);			// SLPOUT (11h/1100h): Sleep Out  
 }
 
 // Second half: after LCD_SLEEPOUT_MS from Sleep Out (the caller waits, and may do other work meanwhile)
@@ -744,6 +769,7 @@ void BuyDisplay_Init_Finish() {
 
 void BuyDisplay_Init() {
 	BuyDisplay_Init_Start();
+	LCD_SleepOut();
 	HAL_Delay(LCD_SLEEPOUT_MS);
 	BuyDisplay_Init_Finish();
 }

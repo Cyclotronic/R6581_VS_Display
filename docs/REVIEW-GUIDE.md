@@ -55,7 +55,7 @@ To see the end result against Ian's code file by file, compare `master` with the
 | `c54973f` | **Stage 1:** SDRAM set-up writes the normal register bank; auto-refresh on, interval from the memory clock; ready-wait with a timeout | `SDRAM_Init_LT`, `SDRAM_RefreshInterval`, `SDRAM_WaitReady_LT` in `lt_init.c` | `SDRAM_INIT_LEGACY=1` | [Stage 1](REWORK-PLAN.md#stage-1-sdram-initialisation), [soak](REWORK-PLAN.md#sdram-retention-soak-2026-10-30) |
 | `8665d46` | SDRAM retention soak (bench instrument) | `SdramSoak_*` in `lt_bench.c`, `docs/tools/soak.py` | off unless `SDRAM_SOAK=1` | as above |
 | `5dbc4c5` | **Stage 2:** every PLL inside its VCO range; memory and core clocks 100 MHz; backlight PWM prescaler from the core clock; timing-adjust mode keeps the boot counter | `SetPLL_LT`, `LT7680_PLL_Initial_LT`, `ConfigurePWMAndSetBrightness` in `lt_init.c`; `TimingAdjust_Poll` in `settings.c` | `LT_CLOCKS_LEGACY=1` | [Stage 2](REWORK-PLAN.md#stage-2-clocks) |
-| `9ac1f63` | **Stage 3:** reset, PLL and SDRAM waits polled with timeouts; PLL read-back; one retry with a hardware reset; fault line, or LED blink if the chip never answers | `LT_Init_LT`, `LT_WaitIdle_LT`, `PLL_Switch_LT` in `lt_init.c`; the init loop in `main()` | `LT_INIT_LEGACY=1`; `LT_FAULT_TEST=n` to exercise it | [Stage 3](REWORK-PLAN.md#stage-3-results-2026-10-30) |
+| `9ac1f63` | **Stage 3:** reset, PLL and SDRAM waits polled with timeouts; PLL read-back; one retry with a hardware reset; fault line, or LED blink if the chip never answers. (`SDRAM_INIT_LEGACY=1` keeps Ian's SDRAM wait, which has no timeout.) | `LT_Init_LT`, `LT_WaitIdle_LT`, `PLL_Switch_LT` in `lt_init.c`; the init loop in `main()` | `LT_INIT_LEGACY=1`; `LT_FAULT_TEST=n` to exercise it | [Stage 3](REWORK-PLAN.md#stage-3-results-2026-10-30) |
 | `153334d` | **Stage 4:** the EXTI handler copies only whole DMA frames; the main loop decodes the copy. Capture pause and SPI1 toggling removed. Fixes an out-of-bounds write in the debug strings | `Capture_FrameEnd`, `Capture_Poll` in `vfd_capture.c`; `stm32f1xx_it.c` | `CAPTURE_LEGACY=1` | [Stage 4](REWORK-PLAN.md#stage-4-results-2026-10-30) |
 | `bc6c094` | **Stage 5:** LT7680 bus on the SPI1 registers at 18 MHz; address frames skipped when unchanged; cache of the registers only the firmware changes | all of `lt_bus.c` | `LT_BUS_HAL=1`, `LT_REG_CACHE=0`, `LT_SPI_PRESC` | [Stage 5](REWORK-PLAN.md#stage-5-results-2026-10-30) |
 | `2a1d2d7` | **Stage 6:** draw only the cells and annunciators that changed, as soon as a new frame is decoded; full repaint every 10 s; `ClearScreen()` as one filled rectangle | `Render_Update`, `DrawChanged`, `BuildMain`, `BuildAux`, `DrawCells` in `render.c`; `ClearScreen`, `LT_WaitDraw` in `lt_draw.c` | `FULL_REDRAW=1`, `FULL_REDRAW_MS`, `EDGE_WIPE=1`, `LT_CLEAR_TEXT=1` | [Stage 6](REWORK-PLAN.md#stage-6-results-2026-10-30) |
@@ -63,7 +63,11 @@ To see the end result against Ian's code file by file, compare `master` with the
 | `82baa04` | Timing-adjust mode chosen at 2.3 s in the main loop, not at start-up (a cold power-up left the display blank) | the `TIMING_MODE_CHECK_MS` block in the main loop | `TIMING_MODE_CHECK_MS` | Stage 7 results, "Cold power-up" |
 | `fdb2383` | Boot in 0.14 s: settings first, LT7680 set-up inside the panel's 120 ms Sleep Out wait, panel SPI at 1 µs. Capture decodes every new whole frame at once | `main()`; `*_Init_Start/_Finish` in `lcd.c`; `Capture_Poll` in `vfd_capture.c`; `Decode_Text`, `Main_Aux_Commit` in `vfd_decode.c` | `LCD_BIT_US=5 LCD_CS_US=10`, `CAPTURE_CONFIRM=1` | [After Stage 7](REWORK-PLAN.md#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30) |
 | `08473bd` | Review guide, rework image in `Prebuilt/`, docs brought up to date, two stale comments in `vfd_capture.c` | comments only | | |
-| (next) | Hardware identity on the timing-adjust page: MCU CPUID, device ID, flash size, cycle counter; panel ID and power-mode bytes; LT7680 set-up result. Notes on clone chips. Image rebuilt | `DrawChipId` in `settings.c`; `LCD_ReadID` in `lcd.c`; its call in `main()` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
+| `ee3f4c6` | Hardware identity on the timing-adjust page: MCU CPUID, device ID, flash size, cycle counter; panel ID; LT7680 set-up result. Notes on clone chips | `DrawChipId` in `settings.c`; `LCD_ReadID` in `lcd.c`; its call in `main()` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
+| `0e75e51` | The panel read also takes the power-mode byte (`0Ah`), which proves the panel answers; ID bytes are unprogrammed (`FFFFFF`) on the ER-TFT4.58-1 | `LCD_ReadID`, `LCD_ReadByte` in `lcd.c` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md#hardware-identity-on-the-timing-adjust-page) |
+| `21f4363` | Timing-adjust page inside the meter's window, every row in the 32 px font; title carries the instructions; `New/Saved:` | `TA_X_*`, `DrawIdLine` and the page in `settings.c` | | [LAYOUT.md](LAYOUT.md#timing-adjust-page) |
+| (review fixes) | From an adversarial review: on a power-on reset only, the panel's first command waits until 10 ms and its Sleep Out until 150 ms after reset (ST7701S reset timing); a SysTick fallback when the DWT cycle counter is missing; every stored setting range-checked; DISPLAY ON detected on every frame (it was missed on ohms ranges); timing-adjust re-sets up the selected set's panel type; the panel read uses no pull | `main()` start-up; `LCD_SleepOut`, `DelayMicroseconds`, `LCD_ReadByte` in `lcd.c`; `Settings_Load`, `TimingAdjust_Poll` in `settings.c`; `Render_Update` | `LCD_POWERON_CMD_MS`, `LCD_POWERON_SLPOUT_MS`, `DELAY_FORCE_SYSTICK=1`, `LCD_READ_US` | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
+| (release commit) | Image rebuilt from the review fixes | none | | |
 
 ## Where the code is now
 
@@ -103,21 +107,24 @@ These are the places where a mistake would matter most, or where the reasoning i
    `LT_REGDUMP=1` compares the cache with the chip once a second: 759 checks in Stage 5 and 440 in Stage 7, no mismatch.
 5. **PLL and refresh arithmetic** (`SetPLL_LT`, `SDRAM_RefreshInterval` in `lt_init.c`), against the LT768x datasheet
    V4.1 sections cited in the comments. Verified by register read-back, not only by calculation.
-6. **Start-up order** (`main()`). Settings load first. The panel gets its first half of set-up, the LT7680 is set up
-   during the panel's 120 ms after Sleep Out, then the panel's second half. Check that nothing touches the panel
+6. **Start-up order** (`main()`). On a power-on reset (`RCC_FLAG_PORRST`) the panel has just come out of its own
+   reset: its first command waits until `LCD_POWERON_CMD_MS` and its Sleep Out until `LCD_POWERON_SLPOUT_MS` after
+   reset, and the LT7680 is set up in between. A warm reset keeps the faster order: settings load first, then the
+   panel's first half of set-up and Sleep Out; the LT7680 is set up during the panel's 120 ms after Sleep Out, then the
+   panel's second half. Check that nothing touches the panel
    inside that 120 ms. Two waits are spun on `HAL_GetTick()`, which needs SysTick running (it is, from `HAL_Init()`).
-7. **`DelayMicroseconds()` uses the Cortex-M3 cycle counter (DWT).** The ST7701S set-up depends on it. On a genuine
-   STM32F103 it is always there. Some Blue Pill clone chips may not implement DWT; on one of those the counter would
-   never advance and the panel set-up would hang at boot. The old SysTick delay didn't have that dependency (it had a
-   wrap bug instead). If clone boards are expected, a fallback is cheap: check once that `CYCCNT` advances, and spin
-   a calibrated loop if it doesn't. Not done; documented in [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md), with how to
-   check a board, and the timing-adjust page now shows whether the counter runs.
+7. **`DelayMicroseconds()` uses the Cortex-M3 cycle counter (DWT), with a fallback.** The ST7701S set-up depends on
+   it. Every ST STM32F103 has the counter, but it is optional in a Cortex-M3, and a clone without it would have hung
+   at boot. The first call now checks that the counter runs; if not, the delay counts SysTick instead, adding up its
+   down-counts across reloads. Check the wrap arithmetic. `-DDELAY_FORCE_SYSTICK=1` forces the fallback, for testing
+   on a genuine chip. See [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md).
 8. **Timing-adjust mode at 2.3 s** (main loop, `TIMING_MODE_CHECK_MS`). The live display has been running for 2.3 s by
    then; the block clears the screen and switches mode. Checked on the bench: holding DCV at power-up starts the
    mode and each press steps to the next set.
-9. **The panel ID read at boot** (`LCD_ReadID` in `lcd.c`). It switches the panel's data pin (PB5) to an input for
-   each 8-clock reply and back (eight reads, about 0.2 ms). Check that the pin is always restored to an output, and that
-   chip select frames each read.
+9. **The panel ID read at boot** (`LCD_ReadID` in `lcd.c`). It switches the panel's data pin (PB5) to a plain input
+   for each 8-clock reply and back (four reads). Check that the pin is always restored to an output, and that chip
+   select frames each read. The panel's reply is weak on this hardware; the reasons for no pull and 5 µs are in
+   [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md#hardware-identity-on-the-timing-adjust-page).
 10. **The settings page** (`settings.c`). It is the last 1 KB page of flash, `0x0800FC00`. Any erase there must write
    the timing set back; the boot-counter words share the page. Never do a full-chip erase when flashing.
 
@@ -135,43 +142,12 @@ These are the places where a mistake would matter most, or where the reasoning i
 
 ## Build matrix
 
-Every documented build option, built from the committed tree with `docs/tools/build.sh` (Arm GNU Toolchain 14.2.Rel1),
-one option at a time on the `-O2` default, plus `-O0`, `-Os` and a combined bench build:
-
-| Build | Options | text | data | bss |
-|---|---|---:|---:|---:|
-| `-O0` | none | 36,196 | 160 | 4,632 |
-| `-O2` | none | 28,044 | 160 | 4,640 |
-| `-Os` | none | 26,216 | 160 | 4,616 |
-| `-O2` | `TIMING_PROBE=1` | 28,544 | 172 | 4,712 |
-| `-O2` | `RENDER_VERIFY=1` | 30,100 | 168 | 5,568 |
-| `-O2` | `CAPTURE_CONFIRM=1` | 28,020 | 160 | 4,640 |
-| `-O2` | `BOOT_TRACE=1` | 28,516 | 160 | 7,272 |
-| `-O2` | `BOOT_DIAG_SHOWS=10` | 29,680 | 164 | 4,664 |
-| `-O2` | `LCD_BIT_US=5` `LCD_CS_US=10` | 28,044 | 160 | 4,640 |
-| `-O2` | `SPLASH_IN_LOOP=1` | 28,660 | 164 | 4,648 |
-| `-O2` | `ONE_VOLT_MODE=1` | 28,060 | 160 | 4,640 |
-| `-O2` | `GLYPH_SELFTEST=1` | 29,500 | 160 | 4,640 |
-| `-O2` | `SDRAM_INIT_LEGACY=1` | 27,968 | 160 | 4,640 |
-| `-O2` | `SDRAM_SOAK=1` | 28,752 | 160 | 4,728 |
-| `-O2` | `LT_CLOCKS_LEGACY=1` | 28,028 | 160 | 4,640 |
-| `-O2` | `LT_INIT_LEGACY=1` | 28,192 | 160 | 4,640 |
-| `-O2` | `LT_FAULT_TEST=2` | 28,052 | 160 | 4,640 |
-| `-O2` | `CAPTURE_LEGACY=1` | 28,008 | 160 | 3,920 |
-| `-O2` | `DECODE_DEBUG=1` | 28,200 | 160 | 5,808 |
-| `-O2` | `LT_BUS_HAL=1` | 29,284 | 156 | 4,624 |
-| `-O2` | `LT_SPI_PRESC=SPI_BAUDRATEPRESCALER_8` | 28,044 | 160 | 4,640 |
-| `-O2` | `LT_REG_CACHE=0` | 27,980 | 160 | 4,624 |
-| `-O2` | `LT_SPI_STATS=1` | 28,100 | 160 | 4,648 |
-| `-O2` | `LT_BUS_TEST=1` | 28,836 | 164 | 4,664 |
-| `-O2` | `FULL_REDRAW=1` | 28,120 | 160 | 4,528 |
-| `-O2` | `FULL_REDRAW_MS=0` | 28,020 | 160 | 4,640 |
-| `-O2` | `EDGE_WIPE=1` | 28,268 | 160 | 4,640 |
-| `-O2` | `LT_CLEAR_TEXT=1` | 28,000 | 160 | 4,640 |
-| `-O2` | `LT_REGDUMP=1` | 28,600 | 160 | 4,696 |
-| `-O0` | `TIMING_PROBE=1` `RENDER_VERIFY=1` `BOOT_TRACE=1` `LT_REGDUMP=1` `LT_SPI_STATS=1` `DECODE_DEBUG=1` | 41,020 | 180 | 9,480 |
-
-All builds succeed. The warnings are the same in every build and all in Ian's code: `-Wformat` on the `%d` used for `uint32_t` timing values (`display.c`, `settings.c`), `-Wunused-value` on `EEPROM_ErasePage(...) == HAL_OK;` (`settings.c`), `-Wstringop-truncation` in the 1 V mode's `strncpy` (`render.c`), and `-Wmultichar` / `-Woverflow` for the UTF-8 `'°'` and `'½'` in the font table (`vfd_decode.c`; the low byte, 0xB0 or 0xBD, is what the code uses). 29 at `-O2`, 27 at `-O0`; none from the rework's own code.
+During the rework every build option was compile-checked on its own, as each stage added it. The final code is built
+at `-O0` and `-O2` with no new warnings; the reference sizes are in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md). The
+remaining warnings are all in Ian's code: `-Wformat` on the `%d` used for `uint32_t` timing values (`display.c`,
+`settings.c`), `-Wunused-value` on `EEPROM_ErasePage(...) == HAL_OK;` (`settings.c`), `-Wstringop-truncation` in the
+1 V mode's `strncpy` (`render.c`), and `-Wmultichar` / `-Woverflow` for the UTF-8 `'°'` and `'½'` in the font table
+(`vfd_decode.c`; the low byte, 0xB0 or 0xBD, is what the code uses). Only the default `-O2` image was flashed and run.
 
 ## Bench evidence
 
@@ -204,7 +180,8 @@ Still to do, from the [deferred visual checks](REWORK-PLAN.md#deferred-visual-ch
 - **Glyphs** (ohm, sigma, ERROR) after long running, with Hydron; the glyph self-test pages and a menu walk compared
   with the earlier photos and log.
 - **Fault line** readable when forced.
-- **Clone chips without DWT** (point 7 above): not tested; no such board here.
+- **Clone chips without DWT** (point 7 above): no such board here; the SysTick fallback was forced on the genuine chip
+  instead.
 - **The identity lines on the timing-adjust page** with no debugger attached (the device ID should read 0 on ST's
   chip), and a panel ID from a panel whose maker programmed it (the ER-TFT4.58-1 reads `FFFFFF`, unprogrammed).
 

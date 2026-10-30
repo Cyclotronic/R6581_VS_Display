@@ -548,7 +548,10 @@ uint8_t Render_Update(uint8_t all)
 
 	render_calls++;
 	BuildAux(a);                                     // first: it sets onethousandmVmodedetected, which BuildMain() uses
-	if (BuildMain(m) && CheckDisplayStatus()) all = 1;   // back on after DISPLAY OFF (glyphs reloaded): draw everything
+	BuildMain(m);                                    // also fills MaindisplayString, which CheckDisplayStatus() reads
+	if (CheckDisplayStatus()) all = 1;               // back on after DISPLAY OFF (glyphs reloaded): draw everything. Checked on
+	                                                 // every frame: Ian's code only checked when the main line had no glyph, so
+	                                                 // DISPLAY ON on an ohms range left the panel dark
 	if (!shown.valid) all = 1;
 #if EDGE_WIPE
 	if (all) EdgeWipe();

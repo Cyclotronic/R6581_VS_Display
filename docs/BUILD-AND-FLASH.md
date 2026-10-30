@@ -94,11 +94,11 @@ warnings that remain are in Ian's code and harmless.
 
 | Build | text | data | bss |
 | --- | ---: | ---: | ---: |
-| `-O0` | 36,196 | 160 | 4,632 |
-| `-O2` | 28,044 | 160 | 4,640 |
+| `-O0` | 36,992 | 160 | 4,640 |
+| `-O2` | 28,732 | 160 | 4,648 |
 
 **Flash budget:** the linker script gives 64 KB at `0x08000000`, but the **last 1 KB page (`0x0800FC00`) belongs to the settings**, so code and data must stay
-below 63 KB (64,512 bytes). There is about 28 KB of headroom at `-O0`. If a build grows past it, the link may still succeed and then overwrite the settings page on flashing. Check the size line.
+below 63 KB (64,512 bytes). There is about 26 KB of headroom at `-O0`. If a build grows past it, the link may still succeed and then overwrite the settings page on flashing. Check the size line.
 
 **Reproducibility:** on the author's machine a rebuild of a published commit with the same toolchain was byte-identical to the image that was flashed and published
 (`firmware.bin`). Compare yours with the checksums in `Prebuilt/<folder>/SHA256SUMS.txt`: `sha256sum -b docs/tools/images/<name>/firmware.bin`. The `.elf` and
@@ -163,6 +163,9 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | Option | Default | Effect |
 | --- | --- | --- |
 | `BOOT_DIAG_SHOWS=n` | 0 | Number of boots that show the speed test and boot screen (0 = never, 10 = the pre-rework behaviour, 255 = every boot) |
+| `LCD_POWERON_CMD_MS=n`, `LCD_POWERON_SLPOUT_MS=n` | 10, 150 | After a power-on reset only: the panel's first command and its Sleep Out wait until these times after reset (the ST7701S needs 5 ms and 120 ms after its own reset). A warm reset skips them |
+| `LCD_READ_US=n` | 5 | Half-clock of the panel ID read at boot, in microseconds |
+| `DELAY_FORCE_SYSTICK=1` | 0 | Bench: the panel SPI delay uses its SysTick fallback (for chips without the DWT cycle counter) even where the counter runs |
 | `LCD_BIT_US=n`, `LCD_CS_US=n` | 1, 1 | Bit-banged SPI to the ST7701S: half clock period and chip-select hold, in microseconds. Ian used 5 and 10 |
 | `CAPTURE_CONFIRM=1` | 0 | Stage 4's first capture rule: every frame must be seen twice before it is decoded. Halves the update rate and freezes the display at 0.1 PLC and faster; for A/B comparison only |
 | `BOOT_TRACE=1` | 0 | Bench: records the first 6 s after power-up (frames, draws, PA11/PA12) for reading over SWD |
@@ -248,7 +251,7 @@ The convention used in `Prebuilt/`:
 | Verify fails | Do not run the board; reflash. If it repeats, check that the image is under 63 KB and try a lower adapter speed |
 | Screen blank after flashing | Power-cycle the meter; check you flashed the `.hex` for this board and that the settings page was not erased (timing values corrupt cause a blank or unstable TFT). Hold DCV at power-up to step through the timing presets, or restore your backup |
 | Boot screen never appears | The boot count is already 10 or more; hold DCV at power-up, or erase the markers by following the reset in [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md) |
-| Odd `?` characters on screen | A pattern missing from `bitmap_characters`; use `menu_logger.py` to find it. A single `?` for one frame is a torn read and harmless |
+| Odd `?` characters on screen | A pattern missing from `bitmap_characters`; use `menu_logger.py` to find it. Since the rework, frames are only decoded whole, and an unknown pattern must be seen twice before it is drawn, so any `?` on screen is a missing pattern, not a torn read |
 
 ## 12. Repository map
 

@@ -664,7 +664,8 @@ What was done:
 
 Bench, with the same checks as Stage 6:
 
-- **Builds:** every option combination builds at `-O0` and `-O2` with no new warnings.
+- **Builds:** every build option builds on its own at `-O0` and `-O2`, with no new warnings. That is one option at a time,
+  not every combination of options.
 - **Size:** `-O2` text is 29,252 bytes, against 29,304 for Stage 6.
 - **Screen read-back:** 60 synthetic screens and 8 live checks, 0 mismatches. The synthetic screens drew the same 654
   cells as Stage 6, because the random sequence is fixed.

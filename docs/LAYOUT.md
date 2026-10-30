@@ -6,7 +6,9 @@
 
 The TFT is 400 x 960 in memory and the text engine rotates 90 degrees, so **X is the vertical position on the screen** and
 **Y runs along the line**. The top 80 X-pixels are overscan (hidden); the visible area is X 80 to 399 by Y 0 to 951.
-Ian's right-edge wipe (8 black lines at Y 952 to 959) covers the panel's blue vertical edge defect and is kept.
+Ian's loop blanked memory rows Y 952 to 959 on every tick (the "right-edge wipe") to hide a blue vertical edge. Since the
+rework that wipe is off by default: those rows read back black without it. `-DEDGE_WIPE=1` brings it back, before each
+full repaint (every 10 s).
 
 ## Current layout
 
