@@ -18,7 +18,7 @@ TREF_MS, ROWS = 64.0, 4096          # LT7680A-R: 4,096 rows, 64 ms (datasheet RE
 TYPICAL_NS = dict(TRCD=15, TRAS=42, TRP=15, TRFC=60, TXSR=70)
 
 
-def elf_symbol(path, name):
+def elf_symbol(path, name, required=True):
     d = open(path, 'rb').read()
     shoff = struct.unpack_from('<I', d, 0x20)[0]
     shentsize, shnum = struct.unpack_from('<HH', d, 0x2e)
@@ -31,7 +31,26 @@ def elf_symbol(path, name):
             n, v = struct.unpack_from('<II', d, o)
             if d[st[4] + n:d.index(b'\x00', st[4] + n)].decode() == name:
                 return v
+    if not required:
+        return None
     sys.exit(f'{name} not in {path}: is it a -DLT_REGDUMP=1 build?')
+
+
+# Init results (Stage 3): variable, size in bytes, meaning. Read by ELF symbol; any missing (older builds) are skipped.
+INIT_VARS = [('lt_fault', 1, 'fault bits (01 reset, 02 no reply, 04 PLL, 08 SDRAM)'), ('lt_init_attempts', 1, 'tries'),
+             ('lt_resets', 1, 'hardware resets'), ('lt_init_ms', 2, 'init ms'), ('lt_idle_polls', 2, 'status polls (reset)'),
+             ('lt_pll_polls', 2, 'REG[00h] polls (PLL)'), ('lt_sdram_init_timeouts', 2, 'SDRAM init timeouts'),
+             ('lt_busy_timeouts', 2, 'busy-wait timeouts'), ('boot_ready_ms', 4, 'live loop started at ms'),
+             ('uwTick', 4, 'now ms')]
+
+
+def init_results(w, elf):
+    out = {}
+    for name, size, _ in INIT_VARS:
+        a = elf_symbol(elf, name, required=False)
+        if a is not None:
+            out[name] = int.from_bytes(w.mem(a, size), 'little')
+    return out
 
 
 def pll(c1, c2):
@@ -153,9 +172,14 @@ def main():
             else:
                 sys.exit('firmware did not answer the dump request')
         raw = w.mem(addr, SIZE)
+        init = init_results(w, a.elf)
 
     d = decode(raw)
     print(summary(d))
+    if not a.bytes and init:
+        d['init_results'] = init
+        print('init: ' + ', '.join(f'{t} {init[n]:#04x}' if n == 'lt_fault' else f'{t} {init[n]}'
+                                   for n, _, t in INIT_VARS if n in init))
     if a.save:
         d['saved'] = time.strftime('%Y-%m-%d %H:%M:%S')
         json.dump(d, open(a.save, 'w'), indent=1)

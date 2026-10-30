@@ -44,11 +44,69 @@ volatile uint8_t LT7680_SPI_Read_ok = 0;
 volatile uint8_t System_Check = 0;
 volatile uint8_t SystemCheckTempValue = 0;
 
+// Init robustness (Stage 3 of docs/REWORK-PLAN.md): results for SWD (tools/regdump.py prints them)
+volatile uint8_t lt_fault = 0;
+volatile uint8_t lt_init_attempts = 0;
+volatile uint16_t lt_init_ms = 0;
+volatile uint16_t lt_busy_timeouts = 0;
+volatile uint16_t lt_pll_polls = 0;
+volatile uint16_t lt_idle_polls = 0;
+volatile uint8_t lt_resets = 0;         // hardware resets since power-up
+
+#if LT_INIT_LEGACY
+#define INIT_GAP(ms) HAL_Delay(ms)      // Ian's fixed waits between register groups
+#else
+#define INIT_GAP(ms) ((void)0)          // register writes need no gap; the PLL and SDRAM waits poll instead
+#endif
+
 void HardwareReset(void) {
+    if (lt_resets < 0xFF) lt_resets++;
     HAL_GPIO_WritePin(RESET_PORT, RESET_PIN, GPIO_PIN_RESET); // Pull reset low
+#if LT_INIT_LEGACY
     HAL_Delay(100); // Delay 100 ms
     HAL_GPIO_WritePin(RESET_PORT, RESET_PIN, GPIO_PIN_SET);   // Release reset
     HAL_Delay(100); // Delay 100 ms
+#else
+    HAL_Delay(LT_RESET_LOW_MS);
+#if LT_FAULT_TEST
+    if (lt_resets <= LT_FAULT_TEST) return;                   // bench test: leave the LT7680 held in reset
+#endif
+    HAL_GPIO_WritePin(RESET_PORT, RESET_PIN, GPIO_PIN_SET);   // Release reset; SendAllToLT7680_LT() waits for it
+#endif
+}
+
+// Until the PLLs run, the LT7680 core runs from the 10 MHz crystal; keep the SPI clock well below that while talking to
+// it then (72 MHz / 64 = 1.1 MHz), and go back to the normal rate (hspi1.Init, 9 MHz) once the PLLs are running.
+static void LT_SpiSlow(uint8_t slow) {
+    __HAL_SPI_DISABLE(&hspi1);          // BR must not change mid-transfer; HAL re-enables SPE on the next transfer
+    MODIFY_REG(hspi1.Instance->CR1, SPI_CR1_BR, slow ? SPI_BAUDRATEPRESCALER_64 : hspi1.Init.BaudRatePrescaler);
+}
+
+// After a reset the status register's bit 1 reads 1 (inhibit: internal reset or power-on display init still running)
+// until the chip can take commands; the Levetop library polls it the same way. Returns 1 once clear.
+static uint8_t LT_WaitIdle_LT(void) {
+    uint32_t t0 = HAL_GetTick();
+    lt_idle_polls = 0;
+    do {
+        if (lt_idle_polls < 0xFFFF) lt_idle_polls++;
+        if ((ReadStatus() & 0x02) == 0) return 1;
+    } while ((HAL_GetTick() - t0) < LT_IDLE_TIMEOUT_MS);
+    return 0;
+}
+
+// Reset and set up the LT7680, retrying once with a fresh hardware reset. Returns the LT_FAULT_* bits of the last try.
+uint8_t LT_Init_LT(void) {
+    uint32_t t0 = HAL_GetTick();
+    uint8_t fault = 0;
+    for (lt_init_attempts = 1; lt_init_attempts <= LT_INIT_TRIES; lt_init_attempts++) {
+        HardwareReset();
+        fault = SendAllToLT7680_LT();
+        if (fault == 0) break;
+    }
+    if (lt_init_attempts > LT_INIT_TRIES) lt_init_attempts = LT_INIT_TRIES;
+    lt_fault = fault;
+    lt_init_ms = (uint16_t)(HAL_GetTick() - t0);
+    return fault;
 }
 
 
@@ -116,65 +174,73 @@ void WriteDataToRegister(uint8_t reg, uint8_t value) {
 //**************************************************************************************************
 // Subs to run and sent to the LT7680
 
-void SendAllToLT7680_LT() {
-  
+// Returns LT_FAULT_* bits; stops early if the LT7680 does not answer at all.
+uint8_t SendAllToLT7680_LT() {
+    uint8_t fault = 0;
+    uint16_t sdram_timeouts = lt_sdram_init_timeouts;
+
+    LT_SpiSlow(1);                            // on the crystal clock until the PLLs run
+    if (!LT_WaitIdle_LT()) fault |= LT_FAULT_RESET;   // hardware reset finished
     Software_Reset_LT();
-    HAL_Delay(10);
-    LT7680_PLL_Initial_LT();                  // Initialize PLL first for stable clocks
-    HAL_Delay(100);
+    HAL_Delay(LT_SWRESET_MS);                 // the status register reads idle at once, but writes are lost for a while
+    if (!LT_WaitIdle_LT()) fault |= LT_FAULT_RESET;
+    fault |= LT7680_PLL_Initial_LT();         // Initialize PLL first for stable clocks (back to the normal SPI rate)
+    if (fault & LT_FAULT_NOREPLY) return fault;
+    INIT_GAP(100);
     SDRAM_Init_LT();                          // Initialize SDRAM after the reset
-    HAL_Delay(5);
+    if (lt_sdram_init_timeouts != sdram_timeouts) fault |= LT_FAULT_SDRAM;
+    INIT_GAP(5);
 
     Set_LCD_Panel_LT();                       // Set up the panel interface
-    HAL_Delay(100);
+    INIT_GAP(100);
 
     //WriteRegister(0x84);                      // Set backlighting Prescaler to zero which effectively turns off backlighting
     //WriteData(0x00); // Prescaler = 00
     //HAL_Delay(5);
 
     LCDConfigTurnOn_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
 
     LCD_HorizontalWidth_VerticalHeight_LT(LCD_XSIZE_TFT, LCD_YSIZE_TFT);
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_Horizontal_Non_Display_LT(LCD_HBPD);  // Horizontal Back Porch
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_HSYNC_Start_Position_LT(LCD_HFPD);    // HSYNC Start Position
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_HSYNC_Pulse_Width_LT(LCD_HSPW);       // HSYNC Pulse Width
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_Vertical_Non_Display_LT(LCD_VBPD);    // Vertical Back Porch
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_VSYNC_Start_Position_LT(LCD_VFPD);    // VSYNC Start Position
-    HAL_Delay(5);
+    INIT_GAP(5);
     LCD_VSYNC_Pulse_Width_LT(LCD_VSPW);       // VSYNC Pulse Width
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetColorDepth_LT();                       // Configure canvas color depth
-    HAL_Delay(5);
+    INIT_GAP(5);
     Configure_Main_PIP_Window_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetMainImageWidth_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetMainWindowUpperLeftX_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     ConfigureActiveDisplayArea_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetActiveWindow_LT();                     // Set active window dimensions
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetCanvasStartAddress_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetCanvasImageWidth_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     ResetGraphicWritePosition_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     SetGraphicRWYCoordinate_LT();
-    HAL_Delay(5);
+    INIT_GAP(5);
     Set_MISA_LT();                            // Configure the Main Image Start Address
-    HAL_Delay(5);
+    INIT_GAP(5);
    
     Text_Mode();
     ClearScreen();                          // Draws black 'spaces' across the whole screen - fast
-    
+    return fault;
 }
 
 
@@ -535,7 +601,7 @@ void DrawTextChunks(char* text) {
 
 
 // DrawText helper
-void WaitForLT7680Ready(void)
+uint8_t WaitForLT7680Ready(void)
 {
 	uint32_t timeout = 100000;
 	uint8_t status;
@@ -543,6 +609,11 @@ void WaitForLT7680Ready(void)
 	do {
 		status = ReadStatus(); // STSR
 	} while ((status & (1 << 3)) && --timeout);
+	if (timeout == 0) {
+		if (lt_busy_timeouts < 0xFFFF) lt_busy_timeouts++;
+		return 0;
+	}
+	return 1;
 }
 
 
@@ -851,6 +922,41 @@ void FillScreen(uint32_t color) {
 uint16_t lt_cclk_mhz = 0;               // core clock set by LT7680_PLL_Initial_LT() (backlight PWM timing)
 uint32_t lt_pclk_khz = 0;               // pixel clock set by LT7680_PLL_Initial_LT()
 
+static uint8_t pll_written[6];          // REG[05h-0Ah] as last written, for the read-back check
+
+static void PllWrite_LT(uint8_t reg, uint8_t v) {
+    pll_written[reg - 0x05] = v;
+    WriteRegister(reg);
+    WriteData(v);
+}
+
+// Switch to the new PLL settings with REG[00h] bit 7 and poll that bit until it reads 1 (the chip is running on the
+// PLLs), then read REG[05h-0Ah] back: no LT7680 on the bus, or a dead SPI read path, shows up here. (Read before the
+// switch they still return the settings in use, the reset values at boot, so the check has to come after it.) Returns to
+// the normal SPI rate and returns LT_FAULT_* bits.
+static uint8_t PLL_Switch_LT(void) {
+    uint8_t fault = 0;
+    uint32_t t0;
+    LT_SpiSlow(1);
+    WriteRegister(0x00);                // reconfigure the PLLs
+    WriteData(0x80);
+    t0 = HAL_GetTick();
+    lt_pll_polls = 0;
+    for (;;) {
+        if (lt_pll_polls < 0xFFFF) lt_pll_polls++;
+        WriteRegister(0x00);
+        if (ReadData() & 0x80) break;
+        if ((HAL_GetTick() - t0) >= LT_PLL_TIMEOUT_MS) { fault |= LT_FAULT_PLL; break; }
+    }
+    INIT_GAP(10);                       // Ian's settle time (legacy init only)
+    LT_SpiSlow(0);
+    for (uint8_t i = 0; i < 6; i++) {
+        WriteRegister(0x05 + i);
+        if (ReadData() != pll_written[i]) fault |= LT_FAULT_NOREPLY;
+    }
+    return fault;
+}
+
 #if !LT_CLOCKS_LEGACY
 // Program one PLL (REG[c1] = OD/R/N[8], REG[c1 + 1] = N[7:0]) as close as possible to target_khz, keeping the VCO
 // (XI * N / R) inside 100-500 MHz (datasheet V4.1, PLL electrical characteristics). R = 5 gives a 2 MHz loop input;
@@ -866,15 +972,15 @@ static uint32_t SetPLL_LT(uint8_t c1, uint32_t target_khz) {
     if (n < 2) n = 2;
     if (n > 511) n = 511;
     while (n > 2 && in_khz * n > 500000u) n--;
-    WriteRegister(c1);     WriteData((uint8_t)((od_code[k] << 6) | (r << 1) | ((n >> 8) & 1)));
-    WriteRegister(c1 + 1); WriteData((uint8_t)(n & 0xFF));
+    PllWrite_LT(c1, (uint8_t)((od_code[k] << 6) | (r << 1) | ((n >> 8) & 1)));
+    PllWrite_LT(c1 + 1, (uint8_t)(n & 0xFF));
     return (in_khz * n) / od_div[k];
 }
 
 // Register 0x05-0x0A, 0x00. Stage 2 of docs/REWORK-PLAN.md: PCLK from the panel timings, MCLK and CCLK fixed
 // (LT_MCLK_MHZ, LT_CCLK_MHZ) instead of 2 x PCLK, every VCO in range. Datasheet rules: CCLK x 2 >= MCLK >= CCLK,
 // CCLK >= 1.5 x PCLK; limits PCLK SCLK_MAX, MCLK 133, CCLK 100 MHz.
-void LT7680_PLL_Initial_LT() {
+uint8_t LT7680_PLL_Initial_LT() {
     uint32_t pclk_khz = ((LCD_HBPD + LCD_HFPD + LCD_HSPW + LCD_XSIZE_TFT) *
         (LCD_VBPD + LCD_VFPD + LCD_VSPW + LCD_YSIZE_TFT) * REFRESH_RATE + 500u) / 1000u;
     uint32_t cclk = LT_CCLK_MHZ, mclk = LT_MCLK_MHZ;
@@ -889,17 +995,14 @@ void LT7680_PLL_Initial_LT() {
     lt_pclk_khz = SetPLL_LT(0x05, pclk_khz);
     lt_mclk_mhz = (uint16_t)(SetPLL_LT(0x07, mclk * 1000u) / 1000u);
     lt_cclk_mhz = (uint16_t)(SetPLL_LT(0x09, cclk * 1000u) / 1000u);
-
-    WriteRegister(0x00);                // reconfigure the PLLs
-    WriteData(0x80);
-    HAL_Delay(10);
+    return PLL_Switch_LT();
 }
 
 #else
 // Ian's original clocks (build with -DLT_CLOCKS_LEGACY=1): MCLK = CCLK = 2 x PCLK, OD = /2 for all three, which leaves
 // the PCLK VCO below its 100 MHz minimum.
 // Register 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x00
-void LT7680_PLL_Initial_LT() {
+uint8_t LT7680_PLL_Initial_LT() {
     // Parameters
 
     // Clock calculations
@@ -923,30 +1026,24 @@ void LT7680_PLL_Initial_LT() {
     unsigned short lpllN_sclk = SCLK, lpllN_cclk = CCLK, lpllN_mclk = MCLK;
 
     // Configure PCLK PLL - TFT pixel clock (max=80MHz) (Registers 0x05 and 0x06)
-    WriteRegister(0x05);
-    WriteData((lpllOD_sclk << 6) | (lpllR_sclk << 1) | ((lpllN_sclk >> 8) & 0x1));      // 8A
+    PllWrite_LT(0x05, (uint8_t)((lpllOD_sclk << 6) | (lpllR_sclk << 1) | ((lpllN_sclk >> 8) & 0x1)));      // 8A
     //WriteData(0x56);          // test
     
-    WriteRegister(0x06);
-    WriteData(lpllN_sclk & 0xFF);                                                       // 1B
+    PllWrite_LT(0x06, (uint8_t)(lpllN_sclk & 0xFF));                                                       // 1B
     //WriteData(0x10);        // test, fixes wierd colour on the "J" on "IanJ" text, but causes flicker
 
     // Configure MCLK PLL - Display memory clock (max=133MHz) (Registers 0x07 and 0x08)
-    WriteRegister(0x07);
-    WriteData((lpllOD_mclk << 6) | (lpllR_mclk << 1) | ((lpllN_mclk >> 8) & 0x1));      // 8A
+    PllWrite_LT(0x07, (uint8_t)((lpllOD_mclk << 6) | (lpllR_mclk << 1) | ((lpllN_mclk >> 8) & 0x1)));      // 8A
     //WriteData(0x8A);          // test
     
-    WriteRegister(0x08);                // 36
-    WriteData(lpllN_mclk & 0xFF);                                                       // 36
+    PllWrite_LT(0x08, (uint8_t)(lpllN_mclk & 0xFF));                // 36                                                       // 36
     //WriteData(0x56);          // test
 
     // Configure CCLK PLL - Core clock (max=100MHz) (Registers 0x09 and 0x0A)
-    WriteRegister(0x09);
-    WriteData((lpllOD_cclk << 6) | (lpllR_cclk << 1) | ((lpllN_cclk >> 8) & 0x1));      // 8A
+    PllWrite_LT(0x09, (uint8_t)((lpllOD_cclk << 6) | (lpllR_cclk << 1) | ((lpllN_cclk >> 8) & 0x1)));      // 8A
     //WriteData(0x56);          // test
     
-    WriteRegister(0x0A);
-    WriteData(lpllN_cclk & 0xFF);                                                       // 36
+    PllWrite_LT(0x0A, (uint8_t)(lpllN_cclk & 0xFF));                                                       // 36
     //WriteData(0x56);          // test
 
     // Remember the clocks actually programmed: Fout = XI * N / (R * OD), OD code 2 = divide by 2
@@ -954,12 +1051,8 @@ void LT7680_PLL_Initial_LT() {
     lt_cclk_mhz = (uint16_t)((LT_XI_MHZ * lpllN_cclk) / (lpllR_cclk * 2u));
     lt_pclk_khz = (LT_XI_MHZ * 1000u * lpllN_sclk) / (lpllR_sclk * 2u);
 
-    // Trigger PLL reconfiguration (Register 0x00)
-    WriteRegister(0x00);
-    WriteData(0x80);
-
-    // Add delay to allow PLL settings to stabilize
-    HAL_Delay(10); // delay
+    // Trigger PLL reconfiguration (Register 0x00) and wait for it
+    return PLL_Switch_LT();
 }
 #endif // LT_CLOCKS_LEGACY
 

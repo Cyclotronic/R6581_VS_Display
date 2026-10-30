@@ -816,6 +816,11 @@ static void BootLine(const char* s, uint8_t heightCode, uint16_t cellW, uint16_t
 	DrawText(s);
 }
 
+void DisplayFaultLine(const char* s)
+{
+	BootLine(s, 0b10, 16, BOOT_NOTE1_ROW_X, 0xFFFF, 0xFF0000);
+}
+
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of)
 {
 	char line[96];

@@ -43,6 +43,7 @@ void DisplayAuxSecondHalf(void);
 void DisplayAnnunciatorsHalf(void);
 
 void DisplaySplash(void);
+void DisplayFaultLine(const char* s);                       // one red line across the middle of the screen (init faults)
 void DisplayBootScreen(uint8_t bootNumber, uint8_t of);   // boot-time diagnostics screen (speed, credits, timing settings)
 
 // ONE_VOLT_MODE: Ian's 1 V display mode (on the 1000 mV range, pressing DCV shows the reading in volts: "+ 0.99999709 VDC", aux "1 V Range").

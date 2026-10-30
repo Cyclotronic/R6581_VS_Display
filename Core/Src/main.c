@@ -118,6 +118,7 @@ volatile uint32_t dbg_loop_count = 0;
 volatile uint32_t dbg_loop_per_sec = 0;
 volatile uint32_t dbg_loop_last_ms = 0;
 volatile uint32_t dbg_loop_test_done = 0;
+volatile uint32_t boot_ready_ms = 0;	// HAL tick when the live loop starts (boot time, Stage 3 of docs/REWORK-PLAN.md)
 
 
 //******************************************************************************
@@ -578,11 +579,16 @@ int main(void) {
 		HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin); // Test LED toggle
 	}
 		
-	HardwareReset();				// Reset LT7680 - Pull LCM_RESET low for 100ms and wait
+	HAL_Delay(BOOT_SETTLE_MS);		// Ian's 1 s before the LT7680 set-up (it used to sit after the reset)
 
-	HAL_Delay(1000);
-	
-	SendAllToLT7680_LT();			// run subs to setup LT7680 based on Levetop info
+	// Reset the LT7680 and run subs to setup LT7680 based on Levetop info; retried once. If the controller does not
+	// answer at all, blink the test LED (PC13) and keep retrying: nothing else is useful without a display.
+	while (LT_Init_LT() & LT_FAULT_NOREPLY) {
+		for (uint8_t i = 0; i < 6; i++) {
+			HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin);
+			HAL_Delay(250);
+		}
+	}
 
 	HAL_Delay(10);
 #if LT_REGDUMP
@@ -688,6 +694,14 @@ int main(void) {
 	//HAL_Delay(10);
 	//ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 
+	if (lt_fault) {					// LT7680 answers but part of its set-up failed: say so (now the panel is up), then carry on
+		char msg[48];
+		snprintf(msg, sizeof(msg), "LT7680 init fault %02X after %u tries", lt_fault, lt_init_attempts);
+		DisplayFaultLine(msg);
+		HAL_Delay(LT_FAULT_SHOW_MS);
+		ClearScreen();
+	}
+
 //**************************************************************************************************
 // Main loop initialize
 	
@@ -722,6 +736,7 @@ int main(void) {
 	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 #endif
 	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
+	boot_ready_ms = HAL_GetTick();
 
 	while (1) {
 

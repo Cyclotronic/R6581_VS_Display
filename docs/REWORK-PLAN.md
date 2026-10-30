@@ -10,6 +10,8 @@ Status (2026-10-30):
 - **Stage 1 done:** registers verified, and the SDRAM retention soak shows no bit loss where the current build loses up to
   3% of bits in 10 minutes ([soak results](#sdram-retention-soak-2026-10-30)).
 - **Stage 2 done:** clocks verified in range, soak clean at 100 MHz.
+- **Stage 3 done:** the init sequence detects faults and recovers, and the live display starts 0.5 s sooner
+  ([results](#stage-3-results-2026-10-30)).
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 - Later stages not started.
 
@@ -95,7 +97,8 @@ The correct value is `MCLK_Hz x 64 ms / 4096`: about 906 at 58 MHz, and 1,562 at
   - `WaitForLT7680Ready()` runs before every character. It ignores its own timeout.
 - **Init:**
   - `Check_SDRAM_Ready_LT()` has no timeout, and polls `E4h` bit 0 instead of status register bit 2.
-  - `Software_Reset_LT()` writes nothing.
+  - `Software_Reset_LT()` writes nothing. (Wrong: it writes `00h` = 01h. Stage 3 found that writes in the next few ms
+    are lost.)
 - **Drawing:**
   - `DrawLine()` doesn't wait for the drawing engine before the next call reprograms it.
   - Every tick redraws all of main, aux and the 18 annunciators, changed or not. Each annunciator costs about 14 register
@@ -300,7 +303,7 @@ Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and 
 
 #### Deferred visual checks
 
-To run once the panel can be seen. Build: `stage2-O2`, or `stage2-soak-regdump-O2` to also read the soak.
+To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to also read the register dump.
 
 1. Panel is stable, with no flicker or colour faults. In particular, check the pixel clock: its frequency is unchanged,
    but its PLL now runs inside the VCO range.
@@ -311,6 +314,9 @@ To run once the panel can be seen. Build: `stage2-O2`, or `stage2-soak-regdump-O
 5. Ohms screen after an hour on another screen: the ohm glyph is intact.
 6. Whether the right-edge wipe is still needed (Stage 6).
 7. Glyph self-test pages and a menu walk, compared with the photos of the current build.
+8. Boot (Stage 3): the panel comes up cleanly with the shorter reset and without the fixed gaps; no flash of garbage.
+9. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
+   `SDRAM_INIT_TIMEOUT_MS`; the fault test build (`-DLT_FAULT_TEST=3`) only exercises the no-reply path.
 
 Goal: every PLL inside its range, and memory and core clocks chosen deliberately instead of as 2 x PCLK.
 
@@ -343,6 +349,42 @@ Goal: no silent hangs, a real reset, and a visible fault instead of a blank pane
   datasheet requires (PLL lock up to 500 us, SDRAM ready by polling). That gives a faster boot.
 - **Ready-wait:** `WaitForLT7680Ready()` returns a status, and callers count timeouts in a `volatile` fault counter.
 - **Checks:** pull the LT7680 reset line during boot (no hang); boot time measured before and after.
+
+#### Stage 3 results (2026-10-30)
+
+What was built:
+
+- `LT_Init_LT()` resets the controller and runs `SendAllToLT7680_LT()`, which now returns fault bits, and retries once
+  on any fault. A fault where the controller doesn't answer at all (`LT_FAULT_NOREPLY`) blinks the test LED (PC13) and
+  retries every 1.5 s, forever. Any other fault shows a red line for 3 s, and boot carries on.
+- The reset pulse is 2 ms instead of 100 ms. The wait for status bit 1 (inhibit) to clear replaces the 100 ms after it.
+- The PLL switch polls `00h` bit 7 and then reads `05h-0Ah` back. The SPI clock runs at 1.1 MHz until the PLLs are
+  running.
+- The twenty fixed 5 to 100 ms gaps between register groups are gone. `-DLT_INIT_LEGACY=1` puts them back.
+- `WaitForLT7680Ready()` returns 0 on a timeout and counts it in `lt_busy_timeouts`.
+- `regdump.py` prints the init results.
+
+Found on the bench:
+
+- **Software reset:** after a write of 01h to `00h`, register writes for a while are lost, even though the status
+  register already reads idle. Ian's 10 ms wait was needed and stays (`LT_SWRESET_MS`).
+- **PLL registers:** `05h-0Ah` read back the settings in use (reset values 14 3C 14 85 14 64), not what was just
+  written, until the switch. The read-back check therefore comes after the switch.
+- **Status bit 1:** it was clear on the first poll every time, so in practice it doesn't hold anything up.
+
+Measurements on the board (no boot screen; the boot count was past 10):
+
+| Build | Init (reset to the end of `ClearScreen`) | Live loop starts |
+|---|---|---|
+| `LT_INIT_LEGACY=1` | 944 ms | 2,888 ms |
+| Stage 3 | 416 ms | 2,364 ms |
+| Stage 3, `LT_FAULT_TEST=3` (controller held in reset for 3 resets) | 834 ms (last call) | 5,125 ms, recovered on reset 4, fault 00 |
+
+Most of the 416 ms is `ClearScreen()` writing about 1,500 characters; that is Stage 6's job. The 1 s `BOOT_SETTLE_MS`
+before init is still there, because nothing says what it is for. Try it shorter once the panel can be watched.
+
+The fault path where the controller answers but its set-up fails (the red line) is built but not yet seen; see the
+deferred visual checks.
 
 ### Stage 4: capture pipeline
 

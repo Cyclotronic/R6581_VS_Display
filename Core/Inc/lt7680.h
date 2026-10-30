@@ -50,7 +50,7 @@ void FillDisplayRAM(void);
 void SoftwareReset(void);
 void SetBacklightFull(void);
 void FillScreen(uint32_t color);
-void SendAllToLT7680_LT(void);
+uint8_t SendAllToLT7680_LT(void);          // returns LT_FAULT_* bits
 //void SetBackgroundColor(color);
 void Text_Mode(void);
 void SetTextColors(uint32_t foreground, uint32_t background);
@@ -60,7 +60,7 @@ void SetTextColors(uint32_t foreground, uint32_t background);
 //void ConfigureFontAndPosition(uint8_t fontSource, uint8_t characterHeight, uint8_t isoCoding, uint8_t fullAlignment, uint8_t chromaKeying, uint8_t rotation, uint8_t widthFactor, uint8_t heightFactor, uint8_t lineGap, uint8_t charSpacing, uint16_t cursorX, uint16_t cursorY)
 
 // Register Configuration
-void LT7680_PLL_Initial_LT(void);
+uint8_t LT7680_PLL_Initial_LT(void);       // returns LT_FAULT_* bits
 void Configure_Main_PIP_Window_LT(void);
 void SDRAM_Init_LT(void);
 void SDRAM_SetRefresh_LT(void);         // rewrite the refresh interval for lt_mclk_mhz (after any PLL change)
@@ -174,6 +174,33 @@ extern uint32_t lt_pclk_khz;
 #define SDRAM_REFRESH_NS		15000u		// one row every 15 us: 64 ms / 4,096 rows = 15.625 us, less ~4% margin
 #endif
 #define SDRAM_INIT_TIMEOUT_MS	100u		// give up waiting for SDRAM init after this (counted in lt_sdram_init_timeouts)
+// Init robustness (Stage 3 of docs/REWORK-PLAN.md). LT_INIT_LEGACY=1 restores Ian's fixed delays (100 ms reset pulse
+// and wait, 5-100 ms between register groups) for boot-time comparison; the checks below run either way.
+#ifndef LT_INIT_LEGACY
+#define LT_INIT_LEGACY			0
+#endif
+#ifndef LT_FAULT_TEST
+#define LT_FAULT_TEST			0			// bench only: hold the LT7680 in reset for the first n hardware resets
+#endif
+#define LT_RESET_LOW_MS			2u			// reset pulse (datasheet: a few oscillator clocks; 2 ms is generous)
+#define LT_SWRESET_MS			10u			// after the software reset (REG[00h] bit 0): measured, writes made sooner are lost
+#define LT_IDLE_TIMEOUT_MS		200u		// after a reset, status bit 1 (inhibit) must clear within this
+#define LT_PLL_TIMEOUT_MS		10u			// REG[00h] bit 7 must read 1 (running on the PLLs) within this
+#define LT_INIT_TRIES			2u			// a failed init is retried once with a hardware reset
+#define BOOT_SETTLE_MS			1000u		// wait before the LT7680 set-up (Ian's; purpose unknown, a candidate to trim)
+#define LT_FAULT_SHOW_MS		3000u		// how long an init fault line stays up
+#define LT_FAULT_RESET			0x01		// status bit 1 never cleared after reset
+#define LT_FAULT_NOREPLY		0x02		// PLL registers did not read back as written: no LT7680 on the bus
+#define LT_FAULT_PLL			0x04		// REG[00h] bit 7 never set
+#define LT_FAULT_SDRAM			0x08		// SDRAM initialisation did not finish
+uint8_t LT_Init_LT(void);					// reset + SendAllToLT7680_LT(), retried; returns LT_FAULT_* bits
+extern volatile uint8_t lt_fault;			// result of the last LT_Init_LT()
+extern volatile uint8_t lt_init_attempts;
+extern volatile uint16_t lt_init_ms;		// how long the last LT_Init_LT() took
+extern volatile uint16_t lt_busy_timeouts;	// WaitForLT7680Ready() gave up
+extern volatile uint16_t lt_pll_polls;		// REG[00h] reads until the PLLs were running
+extern volatile uint16_t lt_idle_polls;		// status reads until the reset inhibit cleared (last wait)
+extern volatile uint8_t lt_resets;			// hardware resets since power-up
 // Ian's values, used only by the legacy sequence:
 #define SDRAM_MCLK				20			// MHz
 #define SDRAM_CLKFREQ			64000000	// SDRAM clock frequency in Hz (clock source)		64000000
@@ -228,7 +255,7 @@ void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage);
 #define GLYPH_CODE_SIGMA  1
 void SetCGRAMStart_LT(uint32_t addr);          // REG[DBh-DEh]: where user-defined glyph code 0 lives
 void LoadCustomGlyphs_LT(void);                // write the glyph sets into both regions
-void WaitForLT7680Ready(void);
+uint8_t WaitForLT7680Ready(void);              // 1 = idle, 0 = gave up (counted in lt_busy_timeouts)
 
 // ---- SDRAM retention soak (non-visual corruption check); build with -DSDRAM_SOAK=1, read with tools/soak.py ------
 #ifndef SDRAM_SOAK
