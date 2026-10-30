@@ -29,7 +29,7 @@ volatile uint8_t Init_Completed_flag = 0;
 volatile uint8_t cap_frame[FRAME_BYTES];
 volatile uint32_t cap_seq = 0;          // complete frames copied by the EXTI handler
 volatile uint32_t cap_short = 0;        // EXTI came before the DMA had the whole frame (frame dropped)
-volatile uint32_t cap_unstable = 0;     // frames that differed from the one before (a change, or a bad frame); not decoded
+volatile uint32_t cap_unstable = 0;     // frames that differed from the one before (a change, or a bad frame)
 volatile uint32_t cap_heldback = 0;     // frames with an unknown pattern, held back until seen twice
 volatile uint32_t cap_decodes = 0;      // frames decoded
 volatile uint32_t cap_unmatched = 0;    // decodes with at least one character not in the font table ('?')
@@ -37,11 +37,11 @@ volatile uint32_t draws = 0;            // redraws that drew something (FULL_RED
 volatile uint32_t draw_unmatched = 0;   // redraws with a '?' in G[]: what would reach the screen
 volatile uint32_t cap_frame_cyc = 0;    // TIMING_PROBE: DWT cycle count when cap_frame was last filled
 volatile uint32_t main_loops = 0;       // passes of the main loop (a measure of idle CPU time)
-static uint8_t cap_armed = 0;
+static uint8_t cap_armed = 0;           // a DMA has been started, so the next EXTI ends a real frame
 #if TIMING_PROBE
 static uint32_t cap_change_cyc;         // when the newest change was first seen (end of its first frame)
 uint32_t cap_decoded_change_cyc;        // the same for the frame Capture_Poll() last decoded (main.c latency probe)
-#endif           // a DMA has been started, so the next EXTI ends a real frame
+#endif
 
 void Capture_FrameEnd(void)
 {

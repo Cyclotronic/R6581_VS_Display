@@ -89,15 +89,16 @@ and converts with `objcopy` to `.hex` and `.bin`. The compile flags were taken f
 `incompatible-pointer-types` and `int-conversion`) so that older revisions and Ian's original source still build. The `-Wformat` and `multi-character`
 warnings that remain are in Ian's code and harmless.
 
-**Expected result:** no `error:` lines, then a size line. Reference sizes for the current `master`:
+**Expected result:** no `error:` lines, then a size line. Reference sizes for the reworked firmware
+(`rework/stage7-structure`; the sizes for every build option are in [REVIEW-GUIDE.md](REVIEW-GUIDE.md#build-matrix)):
 
 | Build | text | data | bss |
 | --- | ---: | ---: | ---: |
-| `-O0` | about 38,900 | 160 | 3,560 |
-| `-O2` | about 30,300 | 160 | 3,500 |
+| `-O0` | 36,196 | 160 | 4,632 |
+| `-O2` | 28,044 | 160 | 4,640 |
 
 **Flash budget:** the linker script gives 64 KB at `0x08000000`, but the **last 1 KB page (`0x0800FC00`) belongs to the settings**, so code and data must stay
-below 63 KB (64,512 bytes). There is about 25 KB of headroom at `-O0`. If a build grows past it, the link may still succeed and then overwrite the settings page on flashing. Check the size line.
+below 63 KB (64,512 bytes). There is about 28 KB of headroom at `-O0`. If a build grows past it, the link may still succeed and then overwrite the settings page on flashing. Check the size line.
 
 **Reproducibility:** on the author's machine a rebuild of a published commit with the same toolchain was byte-identical to the image that was flashed and published
 (`firmware.bin`). Compare yours with the checksums in `Prebuilt/<folder>/SHA256SUMS.txt`: `sha256sum -b docs/tools/images/<name>/firmware.bin`. The `.elf` and

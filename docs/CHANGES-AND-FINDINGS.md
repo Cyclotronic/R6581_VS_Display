@@ -22,8 +22,10 @@ tested on an R6581T with the original VFD-to-TFT hardware (STM32F103C8 "Blue Pil
 
 ### The rework (2026-10-29 and 30)
 
-Stages 0 to 7 of [REWORK-PLAN.md](REWORK-PLAN.md), each with an A/B build option and checked on the bench without a visible
-panel. The results sections of that file have the numbers; the visual checks still to do are listed there.
+Stages 0 to 7 of [REWORK-PLAN.md](REWORK-PLAN.md), each with an A/B build option and checked on the bench, mostly without
+a visible panel (it became visible after Stage 7). The results sections of that file have the numbers; the visual checks
+still to do are listed there. A guide for reviewing the code is in [REVIEW-GUIDE.md](REVIEW-GUIDE.md), and the image is
+[`Prebuilt/rework-2026-10-30-O2/`](../Prebuilt/rework-2026-10-30-O2/).
 
 | Stage | Change | Why | Result |
 | --- | --- | --- | --- |
@@ -34,8 +36,8 @@ panel. The results sections of that file have the numbers; the visual checks sti
 | 4 | Capture keeps whole frames only (since the GPIB tests each is decoded at once; at first a frame had to be seen twice) | The rare `?` came from decoding while DMA wrote the buffer | No `?` in any run since; the board follows the meter's 111 frames a second |
 | 5 | LT7680 bus on SPI1 registers at 18 MHz, address skipping, register cache | HAL was half of every redraw | Redraw 15.0 to 6.6 ms; burst writes proven |
 | 6 | Draw only the cells and annunciators that changed, as soon as a frame is stable; rectangle `ClearScreen()` | Everything was redrawn every 35 ms, then a 6 ms wait | Change-to-screen 32.6 to 10.7 ms on average; read-back matches a full redraw pixel for pixel |
-| after 7 | Boot: LT7680 set-up inside the panel's 120 ms wait, faster panel SPI. Capture: every whole frame decoded at once | Fastest start-up; the two-frame rule froze the display at 0.1 PLC and faster | First frame 0.14 s after reset; latency about 1 ms at up to 111 updates a second |
 | 7 | Files split by job (see the repository map in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md)); dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear fixed | Readability, and two latent bugs | Same results on the bench as Stage 6 |
+| after 7 | Boot: LT7680 set-up inside the panel's 120 ms wait, faster panel SPI. Capture: every whole frame decoded at once | Fastest start-up; the two-frame rule froze the display at 0.1 PLC and faster | First frame 0.14 s after reset; latency about 1 ms at up to 111 updates a second |
 
 ## Test editions (ready-to-flash builds)
 
@@ -89,5 +91,9 @@ The raw captures (photos, videos, logs) are not in this repository; the numbers 
 - ~~**A rare `?`**~~ (about 1 in 1,000 decoded frames) from a torn read of the capture buffer: fixed in rework Stage 4; none since in any 5-minute capture run.
 - **Diag-mode check patterns** (`\x01-\x08`, `\x0B`, `\x0C`, `\x16`) draw as smileys and suits instead of blocks, on the meter's diagnostic screens only.
 - **Never seen lit on the TFT:** INFO and SLOT (blank by design), SRQ (decoded from live data but not yet seen lit).
-- **Not visited:** TRIGGER and CONFIGURE sub-screens, MATH parameter screens, real error text, memory-card pages, and the meter's power-on screen (`Ver.` and `GPIB Addr`).
+- **Not visited:** TRIGGER and CONFIGURE sub-screens, MATH parameter screens, real error text and memory-card pages. (The meter's power-on screen, `Ver.` and `GPIB Addr`, is now drawn: the
+  reworked boot is ready 0.14 s after reset and the meter sends that screen at 0.34 s.)
 - **`-O2` image:** run through the boot counter and the DCV reset; not yet through a full menu walk or a long display-off test.
+- **Rework, not yet checked by eye or by hand:** timing-adjust mode entered by holding DCV at power-up (all 6 sets), a menu
+  walk, the glyph self-test pages, and the 60-minute DISPLAY OFF test. The list is under "Deferred visual checks" in
+  [REWORK-PLAN.md](REWORK-PLAN.md).

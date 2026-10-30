@@ -24,7 +24,8 @@ Status (2026-10-30):
   ([results](#stage-7-results-2026-10-30)). GPIB tests then found and fixed a fault in the capture rule: the board now
   follows the meter's display at its full 111 frames a second, about 1 ms behind
   ([after Stage 7](#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30)).
-- **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
+- **Visual checks:** the panel became visible after Stage 7. It comes up on a cold power-up and shows the meter's
+  power-on screen; the other checks are still to do ([list](#deferred-visual-checks)).
 
 ## Contents
 
@@ -173,6 +174,10 @@ for (;;) {
 The two-frame rule removes torn and transitional frames. Latency drops from up to 35 ms (tick) + 25 ms (draw) to about
 18 ms + the draw of whatever changed.
 
+(Later changed: the GPIB tests after Stage 7 showed the two-frame rule wasn't needed, because copying only whole frames
+already removes the torn ones, and that it froze the display when the reading changed every frame. Every new frame is
+now decoded at once; see [After Stage 7](#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30).)
+
 ## Stages
 
 Each stage lists what changes, how it's checked, and how to turn it off. Stages 1 and 2 are the correctness fixes and
@@ -314,7 +319,8 @@ Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and 
 
 #### Deferred visual checks
 
-To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to also read the register dump.
+To run now the panel can be seen. Build: `Prebuilt/rework-2026-10-30-O2/`, or the same source with `-DLT_REGDUMP=1` to also read
+the register dump.
 
 1. Panel is stable, with no flicker or colour faults. In particular, check the pixel clock: its frequency is unchanged,
    but its PLL now runs inside the VCO range.
@@ -805,7 +811,7 @@ Run for every stage that ships an image:
 | ~~Reset value of `E0h` (256 or 512 columns)~~ | **Answered:** `28h`, 256 columns | |
 | ~~Does `E4h` bit 0 read back as "init done"?~~ | **Answered:** yes; status bit 2 agrees | |
 | Are the reset timing-bank values right for this SDRAM at 100 MHz? | dump + soak at the Stage 2 clocks | whether Stage 1 writes the timing bank |
-| Multi-byte data after one control byte in a CS frame | Stage 5 experiment | glyph and memory-write speed |
-| Highest reliable SPI1 clock on this wiring | Stage 5 scope + readback loop | bus speed |
+| ~~Multi-byte data after one control byte in a CS frame~~ | **Answered (Stage 5):** works; 256-byte burst read back with 0 errors | glyph and memory-write speed |
+| ~~Highest reliable SPI1 clock on this wiring~~ | **Answered (Stage 5):** 18 MHz, the STM32F103's SPI maximum; 0 errors in 100,000 read-backs | bus speed |
 | ~~Cause of the right-edge "random pixels"~~ | **Answered in memory:** with the wipe off, rows 952-959 read black in 72 checks; the panel itself is still to be seen | wipe off by default (`EDGE_WIPE`) |
 | Is the per-character `WaitForLT7680Ready()` needed, or is the write-FIFO-full bit (status bit 7) enough? | Stage 5 | text speed |
