@@ -216,6 +216,19 @@ void SetCGRAMStart_LT(uint32_t addr);          // REG[DBh-DEh]: where user-defin
 void LoadCustomGlyphs_LT(void);                // write the glyph sets into both regions
 void WaitForLT7680Ready(void);
 
+// ---- SDRAM retention soak (non-visual corruption check); build with -DSDRAM_SOAK=1, read with tools/soak.py ------
+#ifndef SDRAM_SOAK
+#define SDRAM_SOAK 0
+#endif
+#if SDRAM_SOAK
+#define SOAK_REGIONS   4             // read every 10 s, 60 s, 10 min, and only on request
+#define SOAK_BASE      0x00300000UL  // above the display page (0..0xBB7FF) and the glyphs (0x200000), below 8 MB
+#define SOAK_STRIDE    0x00010000UL  // 64 KB apart, so each region sits in different SDRAM rows
+#define SOAK_BYTES     1024u         // per region (one 512-column row of 16-bit words)
+void SdramSoak_Start(void);
+void SdramSoak_Poll(void);
+#endif
+
 // ---- Register readback for SWD (Stage 0 of docs/REWORK-PLAN.md); build with -DLT_REGDUMP=1 ------------------
 #ifndef LT_REGDUMP
 #define LT_REGDUMP 0

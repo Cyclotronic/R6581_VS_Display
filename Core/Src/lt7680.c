@@ -1657,6 +1657,112 @@ void LT_RegDump(void) {
 #endif
 
 //**************************************************************************************************
+// SDRAM retention soak (build with -DSDRAM_SOAK=1): a non-visual check for the display-memory corruption.
+// A pseudo-random pattern is written to SOAK_REGIONS areas of SDRAM that the panel never scans (like the glyph region),
+// then read back through the memory data port and compared bit by bit. Reading a row also refreshes it, so each region
+// is read at its own interval; the last one only when asked over SWD. Each write is read straight back once, so a wrong
+// read procedure shows up as errors at time zero (soak_verify_errs) instead of passing silently. tools/soak.py reads it.
+#if SDRAM_SOAK
+static const uint32_t soak_period_ms[SOAK_REGIONS] = { 10000u, 60000u, 600000u, 0u };   // 0 = only on request
+volatile uint32_t soak_errs[SOAK_REGIONS];       // bits wrong at the last read
+volatile uint32_t soak_errs_max[SOAK_REGIONS];   // most bits wrong at any read
+volatile uint32_t soak_reads[SOAK_REGIONS];      // reads done
+volatile uint32_t soak_read_ms[SOAK_REGIONS];    // HAL tick of the last read
+volatile uint32_t soak_written_ms;               // HAL tick of the pattern write
+volatile uint32_t soak_verify_errs;              // bits wrong when read straight back after writing (must be 0)
+volatile uint32_t soak_fifo_timeouts;            // read FIFO never became non-empty
+volatile uint8_t  soak_request;                  // over SWD: bit n = read region n now, bit 7 = rewrite all patterns
+volatile uint8_t  soak_peek[8];                  // first bytes of region 0 as last read, for checking byte order
+
+static uint32_t SoakAddr(uint8_t r) { return SOAK_BASE + (uint32_t)r * SOAK_STRIDE; }
+
+static uint8_t SoakByte(uint32_t *s) {           // xorshift32: fixed sequence per region, all bit patterns
+    uint32_t x = *s;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    *s = x;
+    return (uint8_t)(x >> 24);
+}
+
+static uint8_t PopCount8(uint8_t v) {
+    v = v - ((v >> 1) & 0x55);
+    v = (v & 0x33) + ((v >> 2) & 0x33);
+    return (v + (v >> 4)) & 0x0F;
+}
+
+static void SoakBegin(uint8_t r) {               // point the memory port at the start of region r
+    Graphics_Mode();
+    SetCanvasStart32_LT(SoakAddr(r));
+    ResetGraphicWritePosition_LT();
+    SetGraphicRWYCoordinate_LT();
+}
+
+static void SoakEnd(void) {                      // back to the visible page in text mode, as LoadCustomGlyphs_LT() leaves it
+    SetCanvasStart32_LT(0x00000000UL);
+    ResetGraphicWritePosition_LT();
+    SetGraphicRWYCoordinate_LT();
+    Text_Mode();
+    WaitForLT7680Ready();
+}
+
+static void SoakWrite(uint8_t r) {
+    uint32_t s = 0x9E3779B9u ^ (r * 0x85EBCA6Bu);
+    uint16_t i;
+    SoakBegin(r);
+    for (i = 0; i < SOAK_BYTES; i++) { WriteRegister(0x04); WriteData(SoakByte(&s)); }
+    WaitForLT7680Ready();
+    SoakEnd();
+}
+
+static uint32_t SoakRead(uint8_t r) {            // returns the number of bits that differ from the pattern
+    uint32_t s = 0x9E3779B9u ^ (r * 0x85EBCA6Bu), bad = 0;
+    uint16_t i, t;
+    uint8_t v;
+    SoakBegin(r);
+    WriteRegister(0x04);
+    (void)ReadData();                            // the first read after setting the position is a dummy
+    for (i = 0; i < SOAK_BYTES; i++) {
+        for (t = 0; (ReadStatus() & 0x10) && t < 1000; t++) { }   // status bit 4: read FIFO empty
+        if (t >= 1000) soak_fifo_timeouts++;
+        v = ReadData();
+        if (r == 0 && i < sizeof(soak_peek)) soak_peek[i] = v;
+        bad += PopCount8(v ^ SoakByte(&s));
+    }
+    SoakEnd();
+    return bad;
+}
+
+static void SoakCheck(uint8_t r) {
+    uint32_t bad = SoakRead(r);
+    soak_errs[r] = bad;
+    if (bad > soak_errs_max[r]) soak_errs_max[r] = bad;
+    soak_reads[r]++;
+    soak_read_ms[r] = HAL_GetTick();
+}
+
+void SdramSoak_Start(void) {                     // write every pattern, read each straight back once
+    uint8_t r;
+    soak_verify_errs = 0;
+    for (r = 0; r < SOAK_REGIONS; r++) {
+        SoakWrite(r);
+        soak_verify_errs += SoakRead(r);
+        soak_errs[r] = soak_errs_max[r] = soak_reads[r] = 0;
+        soak_read_ms[r] = HAL_GetTick();
+    }
+    soak_written_ms = HAL_GetTick();
+}
+
+void SdramSoak_Poll(void) {                      // call from the main loop, between draws
+    uint8_t r, req = soak_request;
+    if (req & 0x80) { SdramSoak_Start(); soak_request = 0; return; }
+    for (r = 0; r < SOAK_REGIONS; r++) {
+        if ((req & (1u << r)) || (soak_period_ms[r] && (HAL_GetTick() - soak_read_ms[r]) >= soak_period_ms[r]))
+            SoakCheck(r);
+    }
+    if (req) soak_request = 0;
+}
+#endif
+
+//**************************************************************************************************
 // Boot logo: a 1-bit bitmap (boot_logo.h) drawn in one colour on black into the visible page.
 // Screen column -> memory Y, screen row -> memory X (the panel is rotated 90 degrees). The canvas start address is moved to the
 // bitmap's top-left corner and the active window set to the bitmap's size, so the pixel stream through REG[04h] fills exactly it.

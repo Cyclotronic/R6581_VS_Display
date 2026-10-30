@@ -708,6 +708,9 @@ int main(void) {
 	ClearScreen(); // Again.....
 
 	LoadCustomGlyphs_LT();			// ohm + sigma glyphs, loaded once (and again after DISPLAY OFF)
+#if SDRAM_SOAK
+	SdramSoak_Start();				// write the retention test patterns (tools/soak.py)
+#endif
 
 #if GLYPH_SELFTEST
 	GlyphSelfTest();	// ~90 s of test pages, then normal operation
@@ -743,6 +746,9 @@ int main(void) {
 
 		task_ready = 1; // Mark tasks as complete so the timer driven code is allowed to run again
 
+#if SDRAM_SOAK
+		SdramSoak_Poll();				// read back the retention patterns when due
+#endif
 #if LT_REGDUMP
 		if (lt_regdump_request) {		// set over SWD by tools/regdump.py --again
 			LT_RegDump();
