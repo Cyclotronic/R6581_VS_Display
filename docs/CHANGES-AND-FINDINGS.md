@@ -20,6 +20,22 @@ tested on an R6581T with the original VFD-to-TFT hardware (STM32F103C8 "Blue Pil
 | 10 | Build options: `BOOT_DIAG_SHOWS`, `BOOT_SCREEN_MS`, `SPLASH_IN_LOOP`, `ONE_VOLT_MODE`, `GLYPH_SELFTEST`, `TIMING_PROBE` | Every behaviour change can be undone at build time | All default to the behaviour described above |
 | 11 | Build script for the Arm GNU Toolchain (no VisualGDB) | GCC 14 treats Ian's one implicit declaration as an error; the script downgrades it instead of editing his source | [BENCH-TOOLS.md](BENCH-TOOLS.md) |
 
+### The rework (2026-10-29 and 30)
+
+Stages 0 to 7 of [REWORK-PLAN.md](REWORK-PLAN.md), each with an A/B build option and checked on the bench without a visible
+panel. The results sections of that file have the numbers; the visual checks still to do are listed there.
+
+| Stage | Change | Why | Result |
+| --- | --- | --- | --- |
+| 0 | Register dump over SWD (`LT_REGDUMP`), timing probe extended | See what the LT7680 is really set to | SDRAM auto-refresh found disabled and its timing registers wrong |
+| 1 | SDRAM set-up per the datasheet: refresh on, interval from the memory clock, init polled with a timeout | Display memory decayed: the likely cause of the ohm and left-column corruption after DISPLAY OFF | Retention soak: Ian's set-up loses up to 3% of bits in 10 minutes, the new one none |
+| 2 | Every LT7680 PLL inside its VCO range; memory and core clocks 100 MHz, independent of the pixel clock | Ian's pixel-clock PLL ran below its minimum | Registers verified, soak clean |
+| 3 | Start-up waits polled with timeouts, PLL read-back, retry with a hardware reset, fault line or LED blink | Fixed delays, and no way to tell a dead controller | Live display 0.5 s sooner; a held reset recovers |
+| 4 | Capture keeps whole frames only and decodes a frame after seeing it twice | The rare `?` came from decoding while DMA wrote the buffer | No `?` in 5 minutes, against 5 or 6 |
+| 5 | LT7680 bus on SPI1 registers at 18 MHz, address skipping, register cache | HAL was half of every redraw | Redraw 15.0 to 6.6 ms; burst writes proven |
+| 6 | Draw only the cells and annunciators that changed, as soon as a frame is stable; rectangle `ClearScreen()` | Everything was redrawn every 35 ms, then a 6 ms wait | Change-to-screen 32.6 to 10.7 ms on average; read-back matches a full redraw pixel for pixel |
+| 7 | Files split by job (see the repository map in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md)); dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear fixed | Readability, and two latent bugs | Same results on the bench as Stage 6 |
+
 ## Test editions (ready-to-flash builds)
 
 | Folder | Built from | Optimisation | What it adds | Notes |
@@ -45,6 +61,7 @@ Each folder has its own README with the flash and restore commands, checksums, a
 | Menu walk for decode gaps | no persistent unmatched glyph; sigma found | [BENCH-TOOLS.md](BENCH-TOOLS.md), `tools/menu_logger.py`, `tools/swd.py` |
 | Sigma bitmap | generated, drawn as a user-defined glyph | `tools/make_sigma.py` |
 | Building without VisualGDB | GCC 14 note, build options | `tools/build.sh`, [BENCH-TOOLS.md](BENCH-TOOLS.md) |
+| LT7680 register dump, SDRAM retention soak, capture counters, screen read-back | the non-visual checks behind the rework | [REWORK-PLAN.md](REWORK-PLAN.md), `tools/regdump.py`, `tools/soak.py`, `tools/capture.py` |
 
 The raw captures (photos, videos, logs) are not in this repository; the numbers and conclusions above are.
 
@@ -67,8 +84,8 @@ The raw captures (photos, videos, logs) are not in this repository; the numbers 
 
 ## Still open
 
-- **Ohm/left-column corruption after long DISPLAY OFF** (reported on Hydron's own build, which loads the glyph once): not reproduced here in three short off periods, and not expected on Ian's per-frame build. The reload after DISPLAY OFF in this fork has not had a long (30 to 60 minute) test, including at `-O2`.
-- **A rare `?`** (about 1 in 1,000 decoded frames at `-O0`, none in 1,219 at `-O2`) from a torn read of the capture buffer; it lasts one sample.
+- **Ohm/left-column corruption after long DISPLAY OFF** (reported on Hydron's own build, which loads the glyph once): the likely cause is found and fixed in rework Stage 1. SDRAM auto-refresh was off, and the retention soak showed display memory losing bits within minutes, with none lost since. Still to confirm on a visible panel with a 60-minute DISPLAY OFF (deferred check 4 in [REWORK-PLAN.md](REWORK-PLAN.md)).
+- ~~**A rare `?`**~~ (about 1 in 1,000 decoded frames) from a torn read of the capture buffer: fixed in rework Stage 4; none since in any 5-minute capture run.
 - **Diag-mode check patterns** (`\x01-\x08`, `\x0B`, `\x0C`, `\x16`) draw as smileys and suits instead of blocks, on the meter's diagnostic screens only.
 - **Never seen lit on the TFT:** INFO and SLOT (blank by design), SRQ (decoded from live data but not yet seen lit).
 - **Not visited:** TRIGGER and CONFIGURE sub-screens, MATH parameter screens, real error text, memory-card pages, and the meter's power-on screen (`Ver.` and `GPIB Addr`).

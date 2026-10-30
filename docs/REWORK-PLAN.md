@@ -19,8 +19,10 @@ Status (2026-10-30):
 - **Stage 6 done:** only changed cells are drawn, as soon as a stable frame arrives. A change reaches the screen in
   10.7 ms on average instead of 32.6, and the screen read back from display memory matches Ian's full redraw pixel for
   pixel ([results](#stage-6-results-2026-10-30)).
+- **Stage 7 done:** one job per file, dead code gone, two small bugs fixed; same bench results as Stage 6. The boot path
+  was trimmed too: the meter's first frame is on screen 0.21 s after reset, against about 2.9 s for Ian's start-up
+  ([results](#stage-7-results-2026-10-30)).
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
-- Later stages not started.
 
 ## Contents
 
@@ -326,7 +328,10 @@ To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to
 8. Boot (Stage 3): the panel comes up cleanly with the shorter reset and without the fixed gaps; no flash of garbage.
 9. Menu walk with `menu_logger.py` (Stage 5 asked for it): it needs someone at the front panel, but not the panel
    itself. Compare the screens and characters logged with the earlier walk.
-10. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
+10. Cold power-up (Stage 7): the wait before the LT7680 set-up is now 20 ms instead of 1 s. Switch the meter off and on
+   ten times: the live display must come up each time, with `lt_init_attempts` 1 and `lt_fault` 0 (`regdump.py`). If
+   it doesn't, build with `-DBOOT_SETTLE_MS=1000`.
+11. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
    `SDRAM_INIT_TIMEOUT_MS`; the fault test build (`-DLT_FAULT_TEST=3`) only exercises the no-reply path.
 
 Goal: every PLL inside its range, and memory and core clocks chosen deliberately instead of as 2 x PCLK.
@@ -604,6 +609,88 @@ an overnight run on a changing reading. These are in the deferred checks.
 - Fix `DelayMicroseconds()` (use DWT `CYCCNT`) and the TIM2 flag clear.
 - Update `CHANGES-AND-FINDINGS.md`, `BUILD-AND-FLASH.md` and the build script for the new files and options.
 - This stage is mechanical. It goes last so that every earlier stage diffs cleanly against Ian's code.
+
+#### Stage 7 results (2026-10-30)
+
+What was done:
+
+- **Files split by job.** The table in [Target structure](#target-structure) became:
+
+  | File | From | What |
+  |---|---|---|
+  | `lt_bus.c` | `lt7680.c` | bus layer, register cache, busy wait, bus test and cache check |
+  | `lt_init.c` | `lt7680.c` | reset, PLLs, SDRAM, panel timing, windows, backlight |
+  | `lt_draw.c` | `lt7680.c` | font set-up, text, colours, line, fill, glyphs, boot logo |
+  | `lt_bench.c` | `lt7680.c` | register dump, SDRAM soak, display memory read-back |
+  | `vfd_capture.c` | `main.c` | DMA buffer, frame-end copy, stable-frame rule |
+  | `vfd_decode.c` | `main.c` | unscramble, bitmap table, annunciators |
+  | `settings.c` | `main.c` | flash page, timing sets, boot counter, `Settings_Load()`, `TimingAdjust_Poll()` |
+  | `render.c` | `display.c` | `LineFmt`, Ian's full-redraw functions, the redraw engine and its check |
+  | `display.c` | | boot screen, fault line, splash, glyph self-test |
+  | `main.c` | | start-up and the main loop |
+
+  The moved code is unchanged apart from what joins the pieces: headers `vfd.h` and `settings.h`, `lcd.h` for the panel
+  set-up, and the latency probe's hand-off from capture to `main.c`. There is no separate `screen.c`: `G[]` and
+  `Annunc[]` stay the screen model, and the comparison with what was drawn is in `render.c`. The VisualGDB project
+  lists the new files.
+- **Dead code deleted:** `SendAllToLT7680_LT_2`, `Ohms16x32/12x24SymbolStoreUCG`, `DrawTextChunks`, `DrawText_old`,
+  `SetFontTypeSize`, `CGRAM_Start_address`, `Font_Select_UserDefine_Mode`, `SoftwareReset`, `Software_ResetPLL_LT`,
+  `SetBacklightFull`, `FillScreen`, the commented-out blocks between them, `HAL_SPI_TxCpltCallback`,
+  `RunBluePillSpeedTestOnline`, `DisplayCloneDeterminationMain/Aux`, and unused globals.
+- **Fixes:**
+  - `DelayMicroseconds()` counts CPU cycles (DWT). The old SysTick version's wrap check could never be true, so a
+    delay could end early.
+  - The TIM2 handler clears its flag with a plain write (`SR = ~UIF`) instead of a read-modify-write that could
+    lose another flag.
+  - `SetTimerDuration()` no longer causes an extra tick.
+  - The implicit declaration GCC 14 complained about is gone.
+- **Boot path** (asked for during this stage):
+  - The boot screen is off by default (`BOOT_DIAG_SHOWS=0`).
+  - The 1 s wait before the LT7680 set-up is 20 ms (`BOOT_SETTLE_MS`).
+  - Two unexplained waits (10 ms and 5 ms) and a duplicate `ClearScreen()` are gone.
+  - Capture starts as soon as the peripherals are up, not at the end of start-up.
+  - New timestamps for SWD: `boot_lt_ms`, `boot_panel_ms`, `boot_ready_ms` and `first_frame_ms`.
+
+Bench, with the same checks as Stage 6:
+
+- **Builds:** every option combination builds at `-O0` and `-O2` with no new warnings.
+- **Size:** `-O2` text is 29,252 bytes, against 29,304 for Stage 6.
+- **Screen read-back:** 60 synthetic screens and 8 live checks, 0 mismatches. The synthetic screens drew the same 654
+  cells as Stage 6, because the random sequence is fixed.
+- **Right edge, cleared page, register cache:** right edge clean, cleared page black, register cache 440 checks with 0
+  mismatches.
+- **Timing (`-O2`):** change-to-screen latency 10.2 / 10.7 / 14.8 ms (min / avg / max), against 16.8 / 32.4 / 50.9 ms
+  for `FULL_REDRAW=1`. The same as Stage 6.
+- **Capture:** 5 minutes each at `-O0` and `-O2`, 0 short frames and 0 `?`.
+- **Main-loop passes:** 1.09 M per second at `-O2` (Stage 6: 1.66 M). `Capture_Poll()` now lives in another file, so
+  it is no longer inlined into the loop. This is idle time, not work.
+- **Tick:** the 35 ms tick still runs. Render calls are about 32 per second: 28.6 ticks plus about 6 new frames.
+
+Boot, from reset (10 SWD resets per build, all within a few ms, no retries or faults):
+
+| Build | LT7680 set-up done | Panel set-up done | Live loop | First meter frame drawn |
+|---|---|---|---|---|
+| Ian's start-up (Stage 3 measurement, `LT_INIT_LEGACY`, text `ClearScreen`, no boot screen) | | | 2,888 ms | about 2.9 s |
+| Stage 7 code with Ian's 1 s wait | 1,031 ms | 1,181 ms | 1,182 ms | 1,193 ms |
+| **Stage 7, `-O2`** | **51 ms** | **201 ms** | **202 ms** | **214 ms** (210-216) |
+| Stage 7, `-O0` | 52 ms | 204 ms | 205 ms | 217 ms |
+
+With the boot screen built in (the pre-rework default for the first 10 boots), another 5 s comes first: 1 s of speed
+test and 4 s of screen.
+
+What's left in the 214 ms:
+
+- 20 ms settle.
+- 30 ms LT7680 set-up.
+- 150 ms panel set-up. 120 ms of that is the ST7701S's mandatory wait after Sleep Out; the rest is the bit-banged SPI.
+- About 12 ms for the first frame. Capture has been running, but the stable-frame rule still needs one more matching
+  frame once the loop starts, and then the full draw.
+
+The next saving would be to run the LT7680 set-up inside the panel's 120 ms wait, for about 50 ms. It changes the order
+the panel sees its set-up, so it should wait until the panel can be watched.
+
+A warm reset doesn't test a cold power-up, where the supplies are still rising. That check is in the deferred list
+(item 10).
 
 ## Test protocol
 

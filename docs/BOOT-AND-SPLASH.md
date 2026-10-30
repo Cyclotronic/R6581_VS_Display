@@ -1,5 +1,10 @@
 # Boot diagnostics and the splash screen
 
+> **Since the rework (2026-10-30) the boot screen is off by default** (`BOOT_DIAG_SHOWS=0`): the board goes straight to
+> the live display, which now shows the meter's first frame about 0.21 s after reset (Stage 7 in
+> [REWORK-PLAN.md](REWORK-PLAN.md)). Build with `-DBOOT_DIAG_SHOWS=10` to get the behaviour below back. Holding DCV at
+> power-up still enters the timing-adjust mode; it only resets the boot count when the boot screen is built in.
+
 ## What changed, in one paragraph
 
 In Ian's firmware the BluePill speed test ran at every power-up, and the splash screen (credit line plus the TFT timing
@@ -69,7 +74,8 @@ All of these are compile-time options; none needs a source edit.
 | You want | Build with | Notes |
 | --- | --- | --- |
 | Boot screen on **every** boot | `-DBOOT_DIAG_SHOWS=255` | The counter stops at 16, so the screen then reads `boot 17/255`. |
-| Boot screen **never** (speed test also skipped) | `-DBOOT_DIAG_SHOWS=0` | |
+| Boot screen **never** (speed test also skipped) | `-DBOOT_DIAG_SHOWS=0` | The default since the rework. |
+| The first 10 boots, as described above | `-DBOOT_DIAG_SHOWS=10` | |
 | A different number of boots | `-DBOOT_DIAG_SHOWS=3` | Up to 16 is counted exactly. |
 | Boot screen shorter or longer | `-DBOOT_SCREEN_MS=2000` | Milliseconds, default 4000. |
 | Ian's splash **inside the live loop**, as before | `-DSPLASH_IN_LOOP=1` | Draws over the live display again. Not tested with the current layout: the text sits below the bottom row and may be clipped at the panel edge. |
@@ -79,10 +85,11 @@ Example (see [BENCH-TOOLS.md](BENCH-TOOLS.md)): `EXTRA_CFLAGS="-DBOOT_DIAG_SHOWS
 
 ## Where it is in the code
 
-- `Core/Src/main.c`: `BOOT_DIAG_SHOWS`, `BOOT_SCREEN_MS`, `BootCountRead/Increment/Reset`, and the block just before the
-  boot `ClearScreen()` that decides whether to show the boot screen. `RunBluePillSpeedTestOffline()` ends by drawing it.
+- `Core/Inc/settings.h`, `Core/Src/settings.c`: `BOOT_DIAG_SHOWS`, `BOOT_SCREEN_MS`, `BootCountRead/Increment/Reset`.
+- `Core/Src/main.c`: the block just before the boot `ClearScreen()` that decides whether to show the boot screen.
+  `RunBluePillSpeedTestOffline()` ends by drawing it.
 - `Core/Src/display.c`: `DisplayBootScreen()` (layout constants `BOOT_*_ROW_X` just above it); `DisplaySplash()` returns at once unless `SPLASH_IN_LOOP` is 1.
-- `Core/Src/lt7680.c`, `Core/Inc/boot_logo.h`: `DrawBootLogo_LT()` and the bitmap.
+- `Core/Src/lt_draw.c`, `Core/Inc/boot_logo.h`: `DrawBootLogo_LT()` and the bitmap.
 
 ## Tested
 

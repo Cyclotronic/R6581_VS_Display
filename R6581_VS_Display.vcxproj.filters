@@ -420,6 +420,12 @@
     <ClInclude Include="Core\Inc\lt7680.h">
       <Filter>Header files</Filter>
     </ClInclude>
+    <ClInclude Include="Core\Inc\vfd.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\Inc\settings.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
     <ClInclude Include="Core\Inc\display.h">
       <Filter>Header files</Filter>
     </ClInclude>
@@ -435,7 +441,28 @@
     <ClCompile Include="Core\Src\lcd.c">
       <Filter>Source files</Filter>
     </ClCompile>
-    <ClCompile Include="Core\Src\lt7680.c">
+    <ClCompile Include="Core\Src\lt_bus.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\lt_init.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\lt_draw.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\lt_bench.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\render.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\vfd_capture.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\vfd_decode.c">
+      <Filter>Source files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Src\settings.c">
       <Filter>Source files</Filter>
     </ClCompile>
     <ClCompile Include="Core\Src\display.c">

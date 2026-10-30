@@ -31,7 +31,7 @@ void TIM2_Init(void) {
 // Timer interrupt handler
 void TIM2_IRQHandler(void) {
     if (TIM2->SR & TIM_SR_UIF) { // Check for update interrupt
-        TIM2->SR &= ~TIM_SR_UIF; // Clear the interrupt flag
+        TIM2->SR = ~TIM_SR_UIF;  // Clear the interrupt flag (rc_w0: write 0 to it, 1 to the rest, so no other flag is lost)
         timer_flag = 1;          // Set the timer flag
     }
 }
@@ -41,6 +41,7 @@ void SetTimerDuration(uint16_t ms) {
     // Calculate ARR based on the desired duration in milliseconds
     TIM2->ARR = (10 * ms) - 1; // For a 10 kHz timer clock (1 tick = 0.1 ms)
     TIM2->EGR = TIM_EGR_UG;    // Force update to apply changes immediately
+    TIM2->SR = ~TIM_SR_UIF;    // ... without the update counting as a tick
 }
 
 

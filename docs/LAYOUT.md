@@ -17,7 +17,7 @@ Ian's right-edge wipe (8 black lines at Y 952 to 959) covers the panel's blue ve
 | Aux line | 288 | 32 x 64 (pitch 33) | 32-dot, x2 | Uses the same 16x32 custom-glyph set as the main line |
 
 Gaps are 8 px between rows and about 48 px top and bottom. All positions are macros in `Core/Inc/display.h`
-(`Xpos_ANNUNC`, `Xpos_MAIN`, `Xpos_AUX`). Each text line has one entry in a table (`LineFmt` in `Core/Src/display.c`) giving
+(`Xpos_ANNUNC`, `Xpos_MAIN`, `Xpos_AUX`). Each text line has one entry in a table (`LineFmt` in `Core/Src/render.c`) giving
 font size, multiplier, spacing, pitch, position and glyph set, and one routine draws any line containing a custom glyph, so
 changing a size is a one-line edit. The row sizes match Hydron's published `display.c` (annunciators 12x48, main 48x96,
 aux 32x64); only the positions differ.

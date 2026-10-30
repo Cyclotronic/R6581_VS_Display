@@ -84,9 +84,10 @@ and `BUILD_FLAGS.txt` recording `OPT` and `EXTRA_CFLAGS`. That folder is build o
 assembles `Core/Startup/startup_stm32f103c8tx.S`, then links with `-TFiles/STM32F103C8TX_FLASH.ld --specs=nano.specs --specs=nosys.specs -Wl,-gc-sections`
 and converts with `objcopy` to `.hex` and `.bin`. The compile flags were taken from the project's own VisualGDB response files.
 
-**Known build trap:** GCC 14 treats an implicit function declaration as an error, and Ian's `main.c` has one (`DisplayCloneDeterminationAux`, plus
-`RunBluePillSpeedTestOffline`). The script therefore passes `-Wno-error=implicit-function-declaration` (and the matching `incompatible-pointer-types` and
-`int-conversion`) so that Ian's source is built unmodified. Those warnings in the output are expected. With an older compiler they do not appear.
+**Known build trap:** GCC 14 treats an implicit function declaration as an error, and Ian's `main.c` had two (`DisplayCloneDeterminationAux` and
+`RunBluePillSpeedTestOffline`). Stage 7 removed them, but the script still passes `-Wno-error=implicit-function-declaration` (and the matching
+`incompatible-pointer-types` and `int-conversion`) so that older revisions and Ian's original source still build. The `-Wformat` and `multi-character`
+warnings that remain are in Ian's code and harmless.
 
 **Expected result:** no `error:` lines, then a size line. Reference sizes for the current `master`:
 
@@ -160,7 +161,8 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `BOOT_DIAG_SHOWS=n` | 10 | Number of boots that show the speed test and boot screen (0 = never, 255 = every boot) |
+| `BOOT_DIAG_SHOWS=n` | 0 | Number of boots that show the speed test and boot screen (0 = never, 10 = the pre-rework behaviour, 255 = every boot) |
+| `BOOT_SETTLE_MS=n` | 20 | Wait before the LT7680 set-up; Ian had 1000 for no stated reason. The set-up polls and retries, so a short wait is safe on a warm reset; confirm on cold power-ups |
 | `BOOT_SCREEN_MS=n` | 4000 | How long the boot screen stays up |
 | `SPLASH_IN_LOOP=1` | 0 | Ian's splash drawn in the live loop again (untested with the current layout) |
 | `ONE_VOLT_MODE=1` | 0 | Ian's 1 V display mode (DCV press on the 1000 mV range shows volts); see [ONE-VOLT-MODE.md](ONE-VOLT-MODE.md) |
@@ -189,9 +191,9 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 
 ## 8. Check that it works
 
-1. **Boot screen:** after the flash the board restarts. For the first 10 boots (counting from the stored count) you should see, a few seconds after power-up, the centred
-   boot screen (speed number, the two notes, timing numbers with `boot n/10`, credits with Ian's character); then the live display. The picture is in
-   [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md).
+1. **Boot:** after the flash the board restarts and the live display appears about 0.2 s later. There is no boot screen unless the
+   image was built with `BOOT_DIAG_SHOWS` (then, for that many boots, the centred boot screen with the speed number, timing numbers
+   and credits comes first; the picture is in [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md)).
 2. **Live display:** the meter's main and aux lines and annunciators appear and follow the meter. An ohm range and the statistics screen (sigma) are good tests of the glyph path.
 3. **Settings intact:** dump `0x0800FC00` (section 6) and check the first eight words are still your timing values.
 4. **Optional, with the SWD tools in `docs/tools/`:** `swd.py` reads the decoded display buffers without halting the CPU (start openocd as a server with
@@ -204,18 +206,18 @@ Where things are:
 
 | Task | Where |
 | --- | --- |
-| Add or fix a decoded character | `bitmap_characters[]` in `Core/Src/main.c`: a 5x7 pattern (7 bytes, one per row) and the character it maps to. An unmatched pattern shows as `?` |
-| Add a custom (user-defined) glyph such as ohm or sigma | Glyph data and `LoadCustomGlyphs_LT()` in `Core/Src/lt7680.c`; the placeholder-to-glyph table (`GlyphCodeFor`, `HasGlyph`) and `DrawLineWithGlyphs()` in `Core/Src/display.c`; the decode entry in `main.c`. `docs/tools/make_sigma.py` shows how a glyph is generated |
-| Change a row's size or position | `Xpos_*`, `Ypos_*` macros in `Core/Inc/display.h` and the `LineFmt` table in `Core/Src/display.c`; layout in [LAYOUT.md](LAYOUT.md) |
+| Add or fix a decoded character | `bitmap_characters[]` in `Core/Src/vfd_decode.c`: a 5x7 pattern (7 bytes, one per row) and the character it maps to. An unmatched pattern shows as `?` |
+| Add a custom (user-defined) glyph such as ohm or sigma | Glyph data and `LoadCustomGlyphs_LT()` in `Core/Src/lt_draw.c`; the placeholder-to-glyph table (`GlyphCodeFor`, `HasGlyph`) and `DrawCells()` in `Core/Src/render.c`; the decode entry in `vfd_decode.c`. `docs/tools/make_sigma.py` shows how a glyph is generated |
+| Change a row's size or position | `Xpos_*`, `Ypos_*` macros in `Core/Inc/display.h` and the `LineFmt` table in `Core/Src/render.c`; layout in [LAYOUT.md](LAYOUT.md) |
 | Change the boot screen | `DisplayBootScreen()` and the `BOOT_*_ROW_X` constants in `Core/Src/display.c`; the logo bitmap is `Core/Inc/boot_logo.h`, rebuilt by `docs/tools/make_logo.py` |
-| Change TFT timing presets | the `*_SETTINGS` arrays in `Core/Src/main.c`; Ian's notes on each preset are in `Info/TFT Timing.txt` |
+| Change TFT timing presets | the `*_SETTINGS` arrays in `Core/Src/settings.c`; Ian's notes on each preset are in `Info/TFT Timing.txt` |
 
 Rules learned the hard way (full reasons in the other notes):
 
 - The display geometry is rotated: **X is the vertical screen position, Y runs along the line**, and the top 80 X-pixels are hidden. Keep live content inside X 128 to 352 (the rows now drawn) unless you have checked the visible area on your panel.
-- The main loop has a **35 ms tick**. At `-O0` a full redraw takes about 25 to 30 ms, so adding pixels or fixed delays to the live path can make updates late. Measure with `TIMING_PROBE=1` before and after. See [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md).
+- The live loop draws only what changed, as soon as a stable frame is decoded (`Render_Update()` in `render.c`). Anything new on the live screen must go through it, or it will not be redrawn when it changes. Check a change with `RENDER_VERIFY=1`, which compares the screen with a full redraw, and measure with `TIMING_PROBE=1`. See Stage 6 in [REWORK-PLAN.md](REWORK-PLAN.md).
 - Do not put fixed delays around glyph loading; wait on `WaitForLT7680Ready()` instead.
-- Anything that **erases the settings page** also resets the boot counter and rewrites the timing words; write to it only through the `EEPROM_*` helpers in `main.c`.
+- Anything that **erases the settings page** also resets the boot counter and rewrites the timing words; write to it only through the `EEPROM_*` helpers in `settings.c`.
 - Glyph memory lives in SDRAM at `0x200000` and is lost when the display is turned off; it is reloaded when the display wakes. A new glyph set must go through the same path.
 - After a change: build at `-O0` and `-O2`, check the size, flash, verify, run the checks in section 8, and walk an ohm range, the statistics screen and DISPLAY OFF/ON.
 
@@ -247,7 +249,7 @@ The convention used in `Prebuilt/`:
 
 | Path | What |
 | --- | --- |
-| `Core/Src`, `Core/Inc` | The firmware: `main.c` (decoder, main loop, settings, boot counter), `display.c` (drawing, layout, boot screen), `lt7680.c` (graphics board driver, glyphs, logo), `lcd.c` (TFT controller setup), SPI/DMA/GPIO/timer setup |
+| `Core/Src`, `Core/Inc` | The firmware, one job per file: `main.c` (start-up and the main loop), `vfd_capture.c` and `vfd_decode.c` (the meter's VFD data to `G[]` and `Annunc[]`, header `vfd.h`), `render.c` (the live screen and the redraw engine), `display.c` (boot screen, fault line, splash, glyph self-test), `settings.c` (flash settings page, timing sets, boot counter, timing-adjust mode), `lt_bus.c`, `lt_init.c`, `lt_draw.c` and `lt_bench.c` (the LT7680: bus, start-up, drawing, bench checks; header `lt7680.h`), `lcd.c` (TFT controller setup), SPI/DMA/GPIO/timer setup |
 | `Core/Startup`, `Files/` and `STM32F103C8TX_FLASH.ld` | Startup code and the linker script (64 KB flash at `0x08000000`, 20 KB RAM) |
 | `Drivers/` | CMSIS and the STM32F1 HAL |
 | `VisualGDB/Debug/` | Ian's original build output, including the hex used as the revert target |

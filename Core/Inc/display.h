@@ -38,9 +38,6 @@ extern char ADA_BUY[5];
 
 // Function prototypes
 void DisplayMain(void);
-void DisplayAuxFirstHalf(void);
-void DisplayAuxSecondHalf(void);
-void DisplayAnnunciatorsHalf(void);
 
 void DisplaySplash(void);
 void DisplayFaultLine(const char* s);                       // one red line across the middle of the screen (init faults)

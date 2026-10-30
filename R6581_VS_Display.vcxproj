@@ -104,7 +104,14 @@
   <ItemGroup>
     <ClCompile Include="Core\Src\display.c" />
     <ClCompile Include="Core\Src\lcd.c" />
-    <ClCompile Include="Core\Src\lt7680.c" />
+    <ClCompile Include="Core\Src\lt_bus.c" />
+    <ClCompile Include="Core\Src\lt_init.c" />
+    <ClCompile Include="Core\Src\lt_draw.c" />
+    <ClCompile Include="Core\Src\lt_bench.c" />
+    <ClCompile Include="Core\Src\render.c" />
+    <ClCompile Include="Core\Src\vfd_capture.c" />
+    <ClCompile Include="Core\Src\vfd_decode.c" />
+    <ClCompile Include="Core\Src\settings.c" />
     <ClCompile Include="Core\Src\timer.c" />
     <ClCompile Include="Core\Src\dma.c" />
     <ClCompile Include="Core\Src\gpio.c" />
@@ -133,6 +140,8 @@
     <ClInclude Include="Core\Inc\display.h" />
     <ClInclude Include="Core\Inc\lcd.h" />
     <ClInclude Include="Core\Inc\lt7680.h" />
+    <ClInclude Include="Core\Inc\vfd.h" />
+    <ClInclude Include="Core\Inc\settings.h" />
     <ClInclude Include="Core\Inc\timer.h" />
     <None Include="Hardware\7680-Controller_backside4_V1_2.zip" />
     <None Include="stm32.props" />

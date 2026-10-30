@@ -14,8 +14,9 @@ It applies only when all of these are true: the mode is on, the aux line says `1
 
 - `Core/Src/main.c`: in the main loop, a DCV press (pins A11 and A12 both low) toggles `oneVoltmode` once per press. (Holding DCV
   at power-up is a different thing: the TFT timing-adjust mode, and in this fork the reset of the boot-screen count.)
-- `Core/Src/display.c`, `DisplayMain()`: when `oneVoltmode && onethousandmVmodedetected`, the digits are re-formatted with `sscanf`
-  and string moves, then drawn with the normal main-line format. `DisplayAux()` sets `onethousandmVmodedetected` and draws `1 V Range`.
+- `Core/Src/render.c`, `MainToOneVolt()`: when `oneVoltmode && onethousandmVmodedetected`, the digits are re-formatted with `sscanf`
+  and string moves, then drawn with the normal main-line format. The redraw engine (`BuildMain()`) and Ian's `DisplayMain()` both
+  use it. `BuildAux()` and `DisplayAux()` set `onethousandmVmodedetected` and draw `1 V Range`.
 
 ## Why it is off in this fork
 

@@ -67,17 +67,15 @@ void LCDWriteData(uint8_t data) {
 
 
 
-// delay used by the bit bang SPI	
+// delay used by the bit bang SPI: counts CPU cycles (DWT CYCCNT), which wraps cleanly; the old SysTick version could end early
 void DelayMicroseconds(uint16_t us) {
-	uint32_t start = SysTick->VAL; // Get current SysTick value
-	uint32_t ticks = (HAL_RCC_GetHCLKFreq() / 1000000) * us; // Ticks for desired delay
-	uint32_t reload = SysTick->LOAD + 1;
-
-	while (((start - SysTick->VAL) & 0xFFFFFF) < ticks) {
-		if (SysTick->VAL > reload) { // Handle SysTick counter wrap-around
-			start -= reload;
-		}
+	if (!(DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk)) {
+		CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 	}
+	uint32_t start = DWT->CYCCNT;
+	uint32_t ticks = (SystemCoreClock / 1000000u) * us;
+	while ((DWT->CYCCNT - start) < ticks) { }
 }
 
 

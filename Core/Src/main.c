@@ -32,81 +32,16 @@
 #include <stdbool.h>    // bool support, otherwise use _Bool
 //#include <stdlib.h> // For rand()
 #include "display.h"
+#include "vfd.h"
+#include "settings.h"
+#include "lcd.h"
 #include "stm32f1xx_hal.h"
 #include <stdlib.h>		// required for float (soft FPU)
 
 /* Variables ---------------------------------------------------------*/
-#define FONT_HEIGHT 7
-uint16_t dollarPosition = 0;
 _Bool oneVoltmode = false;
 _Bool oneVoltmodepreviousState = false;
 
-// EEProm emulation (Flash)
-#define EEPROM_START_ADDRESS 0x0800FC00 // Last page for 64KB Flash
-#define EEPROM_PAGE_SIZE     1024       // Page size in bytes
-
-// Boot diagnostics (BluePill speed test + splash screen): shown for the first BOOT_DIAG_SHOWS boots only.
-// Holding DCV at power-up resets the count. The count lives in spare words of the settings page (see BootCountRead).
-#ifndef BOOT_DIAG_SHOWS
-#define BOOT_DIAG_SHOWS      10         // 0 = never; 255 = every boot (-DBOOT_DIAG_SHOWS=255)
-#endif
-#ifndef BOOT_SCREEN_MS
-#define BOOT_SCREEN_MS       4000       // how long the boot screen stays up
-#endif
-#define BOOT_MARKER_OFFSET   64         // byte offset in the settings page of the boot markers (settings use 0..31)
-#define BOOT_MARKER_WORDS    16         // markers available; counting stops at BOOT_DIAG_SHOWS anyway
-uint8_t boot_diag_number = 0;           // 1-based number of the boot being shown (0 = not shown)
-
-HAL_StatusTypeDef EEPROM_WriteData(uint32_t address, uint32_t data);
-HAL_StatusTypeDef EEPROM_Write4CharString(uint32_t address, const char* str);
-HAL_StatusTypeDef EEPROM_ErasePage(uint32_t address);
-uint32_t EEPROM_ReadData(uint32_t address);
-void EEPROM_Read4CharString(uint32_t address, char* buffer);
-static uint8_t BootCountRead(void);
-static void BootCountIncrement(uint8_t count);
-static void BootCountReset(void);
-
-// TFT timing vars
-_Bool timingModsOnBoot = false;
-_Bool timingModsOnBootDCV = false;
-_Bool timingModspreviousstate = false;
-uint8_t currentTimingSet = 0;		// Variable to track the current timing set (0 to 5)
-static bool isFirstPress = true; // Tracks whether this is the first press
-const uint32_t LCD_VBPD_SETTINGS[6]         = { 17, 17, 17, 17, 17, 10 };		// Define the timing settings for each mode
-const uint32_t LCD_VFPD_SETTINGS[6]         = { 14, 14, 14, 15, 15, 12 };
-const uint32_t LCD_VSPW_SETTINGS[6]         = { 2,  3,  4,  2,  2,  3 };
-const uint32_t LCD_HBPD_SETTINGS[6]         = { 50, 50, 50, 50, 50, 80 };
-const uint32_t LCD_HFPD_SETTINGS[6]         = { 30, 30, 30, 30, 30, 30 };
-const uint32_t LCD_HSPW_SETTINGS[6]         = { 10, 10, 10, 10, 10, 20 };
-const uint32_t REFRESH_RATE_SETTINGS[6]     = { 60, 60, 60, 60, 45, 60 };
-const char ADA_BUY_SETTINGS[6][5]           = {"AdaF", "AdaF", "AdaF", "AdaF", "AdaF", "BuyD"};		// 4 characters plus the null terminator('\0').
-uint8_t currentTimingSetNumberentries = 6;	// number of entries	
-uint32_t LCD_VBPD = 17;
-uint32_t LCD_VFPD = 14;
-uint32_t LCD_VSPW = 2;
-uint32_t LCD_HBPD = 50;
-uint32_t LCD_HFPD = 30;
-uint32_t LCD_HSPW = 10;
-uint32_t REFRESH_RATE = 60;
-char ADA_BUY[5] = "AdaF";
-
-#ifndef DECODE_DEBUG
-#define DECODE_DEBUG 0
-#endif
-#if DECODE_DEBUG
-// Bitmaps of the aux characters as text, for a debugger's live watch: "nn : [..x7]\n" per character
-char LCD_buffer_bitmaps[(LINE2_LEN) * 40 + 1];
-#endif
-
-char G[48];  // MAIN: G1 to G18, AUX: G19 to G47
-_Bool Annunc[19]; // Annunciators re-ordered, 18off, G1 to G18 in left-to-right order
-_Bool AnnuncTemp[37]; // Temp array for annunciators. 18off, the order on LCD left to right = 8,7,6,5,4,3,2,1,18,17,16,15,14,13,12,11,10,9
-
-// Global variable to store the unmatched bitmap
-uint8_t unmatchedBitmap[FONT_HEIGHT] = { 0 }; // Initialize to zero
-
-void AdaFruit_Init(void);
-void BuyDisplay_Init(void);
 
 // BluePill clone determination/tests
 volatile uint32_t dbg_sysclk_hz = 0;
@@ -121,79 +56,11 @@ volatile uint32_t dbg_loop_per_sec = 0;
 volatile uint32_t dbg_loop_last_ms = 0;
 volatile uint32_t dbg_loop_test_done = 0;
 volatile uint32_t boot_ready_ms = 0;	// HAL tick when the live loop starts (boot time, Stage 3 of docs/REWORK-PLAN.md)
+volatile uint32_t boot_lt_ms = 0;		// ... when the LT7680 set-up has finished
+volatile uint32_t boot_panel_ms = 0;	// ... when the TFT panel (ST7701S) set-up has finished
+volatile uint32_t first_frame_ms = 0;	// ... when the first decoded meter frame has been drawn
 
 
-//******************************************************************************
-
-// SPI receive buffer for packets data
-volatile uint8_t rx_buffer[PACKET_WIDTH * PACKET_COUNT];
-
-// Array with character bitmaps
-uint8_t chars[CHAR_COUNT][CHAR_HEIGHT];
-
-// Array with annunciators flags (boolean)
-uint8_t flags[CHAR_COUNT];
-
-// When scanning the display, the order of the characters output is not sequential due to optimization of the VFD PCB layout.
-// The Reorder[] array is used as a lookup table to determine the correct position of characters.
-const uint8_t Reorder[PACKET_COUNT] = { 8, 7, 6, 5, 4, 3, 2, 1, 0, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 17, 16, 15, 14, 13, 12, 11, 10, 9, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36 };
-// Order of data to the display (effectively into the shift registers):
-// 8, 7, 6, 5, 4, 3, 2, 1, 0,                                               // MAIN: G9 to G1
-// 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,  // AUX: G19 to G36
-// 17, 16, 15, 14, 13, 12, 11, 10, 9,                                       // MAIN: G18 to G10
-// 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36                               // AUX: G47 to G37
-// But the actual display left to right:
-// G1 to G18 - MAIN
-// G19 to G47 - AUX
-// Annunc[1] to Annunc[18]
-// Annunciators = SMPL IDLE AUTO LOP NULL DFILT MATH AZERO ERR INFO FRONT REAR SLOT LO_G RMT TLK LTN SRQ
-
-// Flag indicating finish of SPI transmission to OLED
-volatile uint8_t SPI1_TX_completed_flag = 1;
-
-// Flag indicating finish of SPI start-up initialization
-volatile uint8_t Init_Completed_flag = 0;
-
-// ---- Capture (Stage 4 of docs/REWORK-PLAN.md) -------------------------------------------------------------------
-// The EXTI handler that restarts the SPI2 DMA every 9 ms first copies the frame the DMA has just finished into
-// cap_frame[] (only if all 235 bytes arrived). The main loop takes a copy with interrupts briefly off, and decodes a frame
-// only when it has seen the same bytes twice in a row and they differ from what is decoded already. So the decoder never
-// sees a frame that DMA is half-way through (the old source of the rare '?'), and does nothing while the display is
-// unchanged. CAPTURE_LEGACY=1 restores decoding rx_buffer on every main-loop pass and the capture pause around drawing.
-#ifndef CAPTURE_LEGACY
-#define CAPTURE_LEGACY 0
-#endif
-#define FRAME_BYTES (PACKET_WIDTH * PACKET_COUNT)
-volatile uint8_t cap_frame[FRAME_BYTES];
-volatile uint32_t cap_seq = 0;          // complete frames copied by the EXTI handler
-volatile uint32_t cap_short = 0;        // EXTI came before the DMA had the whole frame (frame dropped)
-volatile uint32_t cap_unstable = 0;     // frames that differed from the one before (a change, or a bad frame); not decoded
-volatile uint32_t cap_decodes = 0;      // frames decoded
-volatile uint32_t cap_unmatched = 0;    // decodes with at least one character not in the font table ('?')
-volatile uint32_t draws = 0;            // redraws that drew something (FULL_REDRAW=1: every 35 ms tick)
-volatile uint32_t draw_unmatched = 0;   // redraws with a '?' in G[]: what would reach the screen
-volatile uint32_t cap_frame_cyc = 0;    // TIMING_PROBE: DWT cycle count when cap_frame was last filled
-volatile uint32_t main_loops = 0;       // passes of the main loop (a measure of idle CPU time)
-static uint8_t cap_armed = 0;           // a DMA has been started, so the next EXTI ends a real frame
-
-void Capture_FrameEnd(void)
-{
-	if (cap_armed && __HAL_DMA_GET_COUNTER(hspi2.hdmarx) == 0) {
-		memcpy((void*)cap_frame, (const void*)rx_buffer, FRAME_BYTES);
-		cap_seq++;
-#if TIMING_PROBE
-		cap_frame_cyc = DWT->CYCCNT;
-#endif
-	}
-	else if (cap_armed) {
-		cap_short++;
-	}
-	cap_armed = 1;
-}
-
-#ifndef TIMING_PROBE
-#define TIMING_PROBE 0
-#endif
 #if TIMING_PROBE
 // Timing probe (read over SWD): CPU cycle counts (DWT->CYCCNT); divide by SystemCoreClock for seconds.
 volatile uint32_t tp_draw_last, tp_draw_min = 0xFFFFFFFF, tp_draw_max;   // DisplaySplash..right-edge wipe
@@ -205,7 +72,7 @@ static uint32_t tp_prev_entry;
 // Change-to-screen latency (Stage 6): from the end of the first frame that showed a change to the end of the draw.
 // The stable-frame rule alone accounts for one frame (~9 ms). Microseconds.
 volatile uint32_t tp_lat_last, tp_lat_min = 0xFFFFFFFF, tp_lat_max, tp_lat_sum, tp_lat_n;
-static uint32_t tp_change_cyc, tp_lat_from;
+static uint32_t tp_lat_from;
 static uint8_t tp_lat_pending;
 static void TP_Latency(uint32_t end)
 {
@@ -221,338 +88,7 @@ static void TP_Latency(uint32_t end)
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-
-//******************************************************************************
-
-// TFT LCD settings
-uint32_t boot_LCD_VBPD;
-uint32_t boot_LCD_VFPD;
-uint32_t boot_LCD_VSPW;
-uint32_t boot_LCD_HBPD;
-uint32_t boot_LCD_HFPD;
-uint32_t boot_LCD_HSPW;
-uint32_t boot_REFRESH_RATE;
-char boot_ADA_BUY[5];
-uint32_t setting_LCD_VBPD;
-uint32_t setting_LCD_VFPD;
-uint32_t setting_LCD_VSPW;
-uint32_t setting_LCD_HBPD;
-uint32_t setting_LCD_HFPD;
-uint32_t setting_LCD_HSPW;
-uint32_t setting_REFRESH_RATE;
-char setting_ADA_BUY[5];
-
-//******************************************************************************
-
-
-
-//SPI transmission finished interrupt callback
-void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef* hspi) {
-	if (hspi->Instance == SPI1)
-	{
-		SPI1_TX_completed_flag = 1;
-	}
-}
-
-
-//******************************************************************************
-static uint8_t InverseByte(uint8_t a) {
-	a = ((a & 0x55) << 1) | ((a & 0xAA) >> 1);
-	a = ((a & 0x33) << 2) | ((a & 0xCC) >> 2);
-	return (a >> 4) | (a << 4);
-}
-
-
-//******************************************************************************
-// Function to map character bitmaps to ASCII characters
-typedef struct {
-	uint8_t bitmap[7]; // 7 bytes for 5x7 character bitmaps
-	char ascii;        // Corresponding ASCII character
-} BitmapChar;
-
-
-// Font data: 96 characters, 7 bytes per character (each row)
-// These are relative to ISO 8859-1 which is the font installed in the LT7680A-R
-const BitmapChar bitmap_characters[] = {
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, ' '},  // Space
-	{{0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04}, '!'},  // 0x21, !
-	{{0x0A, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00}, '"'},  // 0x22, "
-	{{0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A}, '#'},  // 0x23, #
-	{{0x04, 0x0F, 0x14, 0x0E, 0x05, 0x1E, 0x04}, '$'},  // 0x24, $
-	{{0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03}, '%'},  // 0x25, %
-	{{0x04, 0x0A, 0x0A, 0x0A, 0x15, 0x12, 0x0D}, '&'},  // 0x26, &
-	{{0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00}, '\''}, // 0x27, '
-	{{0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02}, '('},  // 0x28, (
-	{{0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08}, ')'},  // 0x29, )
-	{{0x00, 0x04, 0x15, 0x0E, 0x15, 0x04, 0x00}, '*'},  // 0x2A, *
-	{{0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00}, '+'},  // 0x2B, +
-	{{0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08}, ','},  // 0x2C, ,
-	{{0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}, '-'},  // 0x2D, -
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C}, '.'},  // 0x2E, .
-	{{0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10}, '/'},  // 0x2F, /
-	{{0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}, '0'},  // 0x30, 0
-	{{0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, '1'},  // 0x31, 1
-	{{0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, '2'},  // 0x32, 2
-	{{0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E}, '3'},  // 0x33, 3
-	{{0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, '4'},  // 0x34, 4
-	{{0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}, '5'},  // 0x35, 5
-	{{0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}, '6'},  // 0x36, 6
-	{{0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, '7'},  // 0x37, 7
-	{{0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, '8'},  // 0x38, 8
-	{{0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}, '9'},  // 0x39, 9
-	{{0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00}, ':'},  // 0x3A, :
-	{{0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x04, 0x08}, ';'},  // 0x3B, ;
-	{{0x00, 0x02, 0x06, 0x0E, 0x06, 0x02, 0x00}, '\x11'},  // 0x3C, <
-	{{0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00}, '='},  // 0x3D, =
-	{{0x00, 0x08, 0x0C, 0x0E, 0x0C, 0x08, 0x00}, '\x10'},  // 0x3E, >
-	{{0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04}, '?'},  // 0x3F, ?
-	{{0x0E, 0x11, 0x17, 0x15, 0x17, 0x10, 0x0F}, '@'},  // 0x40, @
-	{{0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, 'A'},  // 0x41, A
-	{{0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}, 'B'},  // 0x42, B
-	{{0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}, 'C'},  // 0x43, C
-	{{0x1C, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1C}, 'D'},  // 0x44, D
-	{{0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}, 'E'},  // 0x45, E
-	{{0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}, 'F'},  // 0x46, F
-	{{0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F}, 'G'},  // 0x47, G
-	{{0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, 'H'},  // 0x48, H
-	{{0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, 'I'},  // 0x49, I
-	{{0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C}, 'J'},  // 0x4A, J
-	{{0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}, 'K'},  // 0x4B, K
-	{{0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}, 'L'},  // 0x4C, L
-	{{0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, 'M'},  // 0x4D, M
-	{{0x11, 0x11, 0x19, 0x15, 0x13, 0x11, 0x11}, 'N'},  // 0x4E, N
-	{{0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, 'O'},  // 0x4F, O
-	{{0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}, 'P'},  // 0x50, P
-	{{0x0E, 0x11, 0x11, 0x11, 0x15, 0x13, 0x0D}, 'Q'},  // 0x51, Q
-	{{0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, 'R'},  // 0x52, R
-	{{0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}, 'S'},  // 0x53, S
-	{{0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, 'T'},  // 0x54, T
-	{{0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, 'U'},  // 0x55, U
-	{{0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}, 'V'},  // 0x56, V
-	{{0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A}, 'W'},  // 0x57, W
-	{{0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}, 'X'},  // 0x58, X
-	{{0x11, 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04}, 'Y'},  // 0x59, Y
-	{{0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}, 'Z'},  // 0x5A, Z
-	//{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, '['},  // 0x5B, [
-	{{0x10, 0x08, 0x04, 0x02, 0x01, 0x02, 0x04}, '\\'}, // 0x5C, backslash
-	//{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, ']'},  // 0x5D, ]
-	{{0x00, 0x10, 0x08, 0x04, 0x02, 0x01, 0x01}, '^'},  // 0x5E, ^
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F}, '_'},  // 0x5F, _
-	{{0x01, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00}, '`'},  // 0x60, `
-	{{0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F}, 'a'},  // 0x61, a
-	{{0x10, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x1E}, 'b'},  // 0x62, b
-	{{0x00, 0x00, 0x0F, 0x10, 0x10, 0x10, 0x0F}, 'c'},  // 0x63, c
-	{{0x01, 0x01, 0x01, 0x0F, 0x11, 0x11, 0x0F}, 'd'},  // 0x64, d
-	{{0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0F}, 'e'},  // 0x65, e
-	{{0x02, 0x05, 0x04, 0x1F, 0x04, 0x04, 0x04}, 'f'},  // 0x66, f
-	{{0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x1F}, 'g'},  // 0x67, g
-	{{0x10, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11}, 'h'},  // 0x68, h
-	{{0x00, 0x04, 0x00, 0x04, 0x04, 0x04, 0x04}, 'i'},  // 0x69, i
-	{{0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0C}, 'j'},  // 0x6A, j
-	{{0x08, 0x08, 0x09, 0x0A, 0x0C, 0x0A, 0x09}, 'k'},  // 0x6B, k
-	{{0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, 'l'},  // 0x6C, l
-	{{0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x11}, 'm'},  // 0x6D, m
-	{{0x00, 0x00, 0x16, 0x19, 0x11, 0x11, 0x11}, 'n'},  // 0x6E, n
-	{{0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E}, 'o'},  // 0x6F, o
-	{{0x00, 0x00, 0x1E, 0x11, 0x1E, 0x10, 0x10}, 'p'},  // 0x70, p
-	//{{0x00, 0x00, 0x0D, 0x13, 0x0F, 0x01, 0x01}, 'q'},  // 0x71, q
-	{{0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10}, 'r'},  // 0x72, r
-	{{0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E}, 's'},  // 0x73, s
-	{{0x04, 0x04, 0x1F, 0x04, 0x04, 0x05, 0x02}, 't'},  // 0x74, t
-	{{0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0D}, 'u'},  // 0x75, u
-	{{0x00, 0x00, 0x11, 0x11, 0x11, 0x0A, 0x04}, 'v'},  // 0x76, v
-	{{0x00, 0x00, 0x11, 0x11, 0x15, 0x15, 0x0A}, 'w'},  // 0x77, w
-	//{{0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x00}, 'x'},  // 0x78, x	{0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11}
-	{{0x00, 0x00, 0x11, 0x11, 0x0F, 0x01, 0x1E}, 'y'},  // 0x79, y
-	{{0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F}, 'z'},  // 0x7A, z
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, '{'},  // 0x7B, {
-	{{0x01, 0x02, 0x04, 0x00, 0x04, 0x02, 0x01}, '|'},  // 0x7C, |
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, '}'},  // 0x7D, }
-	{{0x00, 0x00, 0x09, 0x15, 0x12, 0x00, 0x00}, '~'},  // 0x7E, ~
-	{{0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00}, '/'},  // forward slash
-	{{0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00}, '°'},	// DegC symbol
-	{{0x0E, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x1B}, '$'},	// Ohm symbol placeholder uses the $ symbol for detection of Ohm symbol
-	{{0x11, 0x12, 0x14, 0x0B, 0x11, 0x02, 0x03}, '½'},	// half symbol
-	{{0x00, 0x00, 0x04, 0x0E, 0x1F, 0x00, 0x00}, '\x1E'},	// up arrow
-	{{0x00, 0x00, 0x1F, 0x0E, 0x04, 0x00, 0x00}, '\x1F'},	// down arrow
-	{{0x00, 0x00, 0x09, 0x09, 0x09, 0x09, 0x16}, '\xB5' },	// micro u
-	{{0x00, 0x04, 0x02, 0x1F, 0x02, 0x04, 0x00}, '\x1A' },	// arrow right
-	{{0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}, '\x08' },	// Diag mode display check 1		Unit separator usually. all pixels lit, this one appears on the display chack and the memorycard file name selection (albeit invalid)
-	{{0x00, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}, '\x01' },	// Diag mode display check 2
-	{{0x00, 0x00, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}, '\x02' },	// Diag mode display check 3
-	{{0x00, 0x00, 0x00, 0x1F, 0x1F, 0x1F, 0x1F}, '\x03' },	// Diag mode display check 4
-	{{0x00, 0x00, 0x00, 0x00, 0x1F, 0x1F, 0x1F}, '\x04' },	// Diag mode display check 5
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x1F}, '\x05' },	// Diag mode display check 6
-	{{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F}, '\x06' },	// Diag mode display check 7
-	{{0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F}, '\x07' },	// Diag mode display check 8
-	{{0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07}, '\x0B' },	// Diag mode display check 9
-	{{0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03}, '\x0C' },	// Diag mode display check 10
-	{{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, '\x16' },	// Diag mode display check 11
-	{{0x10, 0x10, 0x14, 0x12, 0x1F, 0x02, 0x04}, '\x1A' },  // arrow right for R6243 menu char
-	{{0x00, 0x04, 0x0E, 0x1F, 0x0E, 0x04, 0x00}, '\x04' },  // diamond for R6243 main menu char
-	{{0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x01}, 'q' },     // 0x71, q
-	{{0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11}, 'x' },     // 0x78, x
-	{{0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E}, '[' },     // 0x5B, [
-	{{0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E}, ']' },     // 0x5D, ]
-	{{0x07, 0x08, 0x0E, 0x11, 0x11, 0x12, 0x0C}, '\x7F'},    // lowercase sigma (statistics screen); drawn as a custom glyph, see display.c
-};
-
-
-// Convert a 5x7 bitmap to an ASCII character
-// The bitmap (7 rows of 5 bits each) is compared row by row against the font_data.
-// The comparison involves the 7 rows of the bitmap against the corresponding 7 rows in each font_data entry.
-char BitmapToChar(const uint8_t* bitmap) {
-	// Iterate over the bitmap_characters array
-	for (int i = 0; i < sizeof(bitmap_characters) / sizeof(BitmapChar); i++) {
-		// Compare the input bitmap with the current character's bitmap
-		if (memcmp(bitmap, bitmap_characters[i].bitmap, FONT_HEIGHT) == 0) {
-			return bitmap_characters[i].ascii; // Return the matching ASCII character
-		}
-	}
-
-	// uncomment this to capture the unmatched bitmap and use LIVE WATCH to display the array for it
-	memcpy(unmatchedBitmap, bitmap, FONT_HEIGHT);
-
-	// If no match is found, return '?'
-	return '?';
-}
-
-
-//******************************************************************************
-
-// Each character on the display is encoded by a matrix of 40 bits packed
-// into 5 consecutive bytes. 5x7=35 bits (S1-S35) define the pixel image of the character,
-// 1 bit (S36) is the annunciator, 4 bits are not used. To optimize VFD PCB routing,
-// the bit order in packets is shuffled:
-//
-// S17 S16 S15 S14 S13 S12 S11 S10
-// S9  S8  S7  S6  S5  S4  S3  S2
-// S1  S36 0   0   0   0   S35 S34
-// S33 S32 S31 S30 S29 S28 S27 S26
-// S25 S24 S23 S22 S21 S20 S19 S18
-//
-// The Packets_to_chars function sorts the character bitmap, extracts the annunciator
-// flag, and stores the result in separate arrays chars[][] and flags[]
-//
-// 0 0 0 S1  S2  S3  S4  S5
-// 0 0 0 S6  S7  S8  S9  S10
-// 0 0 0 S11 S12 S13 S14 S15
-// 0 0 0 S16 S17 S18 S19 S20
-// 0 0 0 S21 S22 S23 S24 S25
-// 0 0 0 S26 S27 S28 S29 S30
-// 0 0 0 S31 S32 S33 S34 S35
-//
-void Packets_to_chars(const volatile uint8_t* buf) {
-	for (int i = 0; i < PACKET_COUNT; i++) {
-		uint8_t d0 = buf[i * PACKET_WIDTH + 0];
-		uint8_t d1 = buf[i * PACKET_WIDTH + 1];
-		uint8_t d2 = buf[i * PACKET_WIDTH + 2];
-		uint8_t d3 = buf[i * PACKET_WIDTH + 3];
-		uint8_t d4 = buf[i * PACKET_WIDTH + 4];
-
-		chars[Reorder[i]][0] = 0x1F & InverseByte((d1 << 4) | ((d2 & 0x80) >> 4));
-		chars[Reorder[i]][1] = 0x1F & InverseByte((d0 << 7) | ((d1 & 0xF0) >> 1));
-		chars[Reorder[i]][2] = 0x1F & InverseByte((d0 & 0xFE) << 2);
-		chars[Reorder[i]][3] = 0x1F & InverseByte(((d0 & 0xC0) >> 3) | (d4 << 5));
-		chars[Reorder[i]][4] = 0x1F & InverseByte(d4 & 0xF8);
-		chars[Reorder[i]][5] = 0x1F & InverseByte(d3 << 3);
-		chars[Reorder[i]][6] = 0x1F & InverseByte((d2 << 6) | ((d3 & 0xE0) >> 2));
-		flags[Reorder[i]] = (d2 & 0x40) == 0x40;
-
-		// Update annunciator boolean array for MAIN annunciators (G1 to G18)
-		if (i < 37) {
-			AnnuncTemp[i] = flags[Reorder[i]];
-		}
-	}
-}
-
-
-void ReorderAnnunciators(void) {
-	// Map AnnuncTemp[] to Annunc[] for left-to-right order.
-	// 8, 7, 6, 5, 4, 3, 2, 1, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9
-	// See 'Order of data packets' on MickleT's schematic
-	Annunc[1] = AnnuncTemp[8];  // G1		SAMPLE
-	Annunc[2] = AnnuncTemp[7];  // G2		IDLE
-	Annunc[3] = AnnuncTemp[6];  // G3		AUTO
-	Annunc[4] = AnnuncTemp[5];  // G4		LOP
-	Annunc[5] = AnnuncTemp[4];  // G5		NULL
-	Annunc[6] = AnnuncTemp[3];  // G6		DFILT
-	Annunc[7] = AnnuncTemp[2];  // G7		MATH
-	Annunc[8] = AnnuncTemp[1];  // G8		AZERO
-	Annunc[9] = AnnuncTemp[0];  // G9		ERR
-	Annunc[10] = AnnuncTemp[35]; // G10		INFO
-	Annunc[11] = AnnuncTemp[34]; // G11		FRONT
-	Annunc[12] = AnnuncTemp[33]; // G12		REAR
-	Annunc[13] = AnnuncTemp[32]; // G13		SLOT
-	Annunc[14] = AnnuncTemp[31]; // G14		LO.G
-	Annunc[15] = AnnuncTemp[30]; // G15		RMT
-	Annunc[16] = AnnuncTemp[29]; // G16		TLK
-	Annunc[17] = AnnuncTemp[28]; // G17		LSN
-	Annunc[18] = AnnuncTemp[27]; // G18		SRQ
-}
-
-
-void Main_Aux_R6581(void) {
-	uint8_t unmatched = 0;
-
-	ReorderAnnunciators();  // re-order the annunciators so Annunnciator[1] is above G1
-
-	for (int i = 0; i < CHAR_COUNT; i++) {      // G1 to G18 MAIN, G19 to G47 AUX
-		G[i + 1] = BitmapToChar(chars[i]);
-		if (G[i + 1] == '?') unmatched = 1;
-	}
-	cap_decodes++;
-	if (unmatched) cap_unmatched++;
-
-#if DECODE_DEBUG
-	LCD_buffer_bitmaps[0] = '\0';
-	for (int i = LINE1_LEN, n = 0; i < CHAR_COUNT; i++) {
-		const uint8_t* b = chars[i];
-		n += snprintf(LCD_buffer_bitmaps + n, sizeof(LCD_buffer_bitmaps) - n,
-			"%d : [%02X, %02X, %02X, %02X, %02X, %02X, %02X]\n", i, b[0], b[1], b[2], b[3], b[4], b[5], b[6]);
-		if (n >= (int)sizeof(LCD_buffer_bitmaps)) break;
-	}
-#endif
-}
-
-#if !CAPTURE_LEGACY
-// Decode the newest captured frame once it has been seen twice in a row (see Capture_FrameEnd). Returns 1 if it decoded one.
-static uint8_t Capture_Poll(void)
-{
-	static uint8_t now[FRAME_BYTES], prev[FRAME_BYTES], shown[FRAME_BYTES];
-	static uint32_t seen = 0;
-	static uint8_t have_prev = 0, have_shown = 0;
-
-	if (cap_seq == seen) return 0;
-	__disable_irq();
-	memcpy(now, (const void*)cap_frame, FRAME_BYTES);
-	seen = cap_seq;
-#if TIMING_PROBE
-	uint32_t at = cap_frame_cyc;
-#endif
-	__enable_irq();
-
-	if (!have_prev || memcmp(now, prev, FRAME_BYTES) != 0) {   // new or changed: wait for the same bytes again
-		if (have_prev) cap_unstable++;
-		memcpy(prev, now, FRAME_BYTES);
-		have_prev = 1;
-#if TIMING_PROBE
-		tp_change_cyc = at;
-#endif
-		return 0;
-	}
-	if (have_shown && memcmp(now, shown, FRAME_BYTES) == 0) return 0;   // already decoded
-	memcpy(shown, now, FRAME_BYTES);
-	have_shown = 1;
-	Packets_to_chars(now);
-	Main_Aux_R6581();
-#if TIMING_PROBE
-	tp_lat_from = tp_change_cyc;
-	tp_lat_pending = 1;
-#endif
-	return 1;
-}
-#endif
+void RunBluePillSpeedTestOffline(void);
 
 
 //************************************************************************************************************************************************************
@@ -573,6 +109,7 @@ int main(void) {
 	MX_SPI1_Init();					// SPI1 - LT760A-R
 	MX_SPI2_Init();					// SPI2 - VFD
 	TIM2_Init();					// Initialize the timer
+	Init_Completed_flag = 1;		// start capturing VFD frames now, so stable ones are waiting when the live loop starts
 
 	// Pull CS high and SCLK low immediately after reset
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_SET);			// Pull CS high
@@ -604,7 +141,7 @@ int main(void) {
 		HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin); // Test LED toggle
 	}
 		
-	HAL_Delay(BOOT_SETTLE_MS);		// Ian's 1 s before the LT7680 set-up (it used to sit after the reset)
+	HAL_Delay(BOOT_SETTLE_MS);		// was Ian's 1 s; see lt7680.h
 
 	// Reset the LT7680 and run subs to setup LT7680 based on Levetop info; retried once. If the controller does not
 	// answer at all, blink the test LED (PC13) and keep retrying: nothing else is useful without a display.
@@ -615,7 +152,7 @@ int main(void) {
 		}
 	}
 
-	HAL_Delay(10);
+	boot_lt_ms = HAL_GetTick();
 #if LT_REGDUMP
 	LT_RegDump();					// register readback for SWD (tools/regdump.py)
 #endif
@@ -626,10 +163,7 @@ int main(void) {
 	// Main loop timer
 	SetTimerDuration(35);			// 35 ms timed action set
 
-	HAL_Delay(5);
 	ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
-
-	ClearScreen();					// Again.....
 
 	// Read pin A12 - Enter timing changes on boot if DCV button held in during power up
 	GPIO_PinState pinA12 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
@@ -640,70 +174,7 @@ int main(void) {
 	}
 
 
-	// test eeprom (flash)
-	//EEPROM_ErasePage(EEPROM_START_ADDRESS) == HAL_OK;
-	//EEPROM_WriteData(EEPROM_START_ADDRESS + 28, 123);
-	//TEST1 = EEPROM_ReadData(EEPROM_START_ADDRESS + 28);
-	// 
-	//EEPROM_ErasePage(EEPROM_START_ADDRESS) == HAL_OK;
-	//EEPROM_Write4CharString(EEPROM_START_ADDRESS + 28, "AdaF");
-
-	// Load settings from EEProm (Flash)
-	setting_LCD_VBPD = EEPROM_ReadData(EEPROM_START_ADDRESS);
-	setting_LCD_VFPD = EEPROM_ReadData(EEPROM_START_ADDRESS + 4);
-	setting_LCD_VSPW = EEPROM_ReadData(EEPROM_START_ADDRESS + 8);
-	setting_LCD_HBPD = EEPROM_ReadData(EEPROM_START_ADDRESS + 12);
-	setting_LCD_HFPD = EEPROM_ReadData(EEPROM_START_ADDRESS + 16);
-	setting_LCD_HSPW = EEPROM_ReadData(EEPROM_START_ADDRESS + 20);
-	setting_REFRESH_RATE = EEPROM_ReadData(EEPROM_START_ADDRESS + 24);
-	EEPROM_Read4CharString(EEPROM_START_ADDRESS + 28, setting_ADA_BUY);
-
-
-	// Copy retrieved vars from Flash for showing on splash screen
-	boot_LCD_VBPD = setting_LCD_VBPD;
-	boot_LCD_VFPD = setting_LCD_VFPD;
-	boot_LCD_VSPW = setting_LCD_VSPW;
-	boot_LCD_HBPD = setting_LCD_HBPD;
-	boot_LCD_HFPD = setting_LCD_HFPD;
-	boot_LCD_HSPW = setting_LCD_HSPW;
-	boot_REFRESH_RATE = setting_REFRESH_RATE;
-	strcpy(boot_ADA_BUY, setting_ADA_BUY);
-
-	// Check if loaded values are ok
-	if (setting_LCD_VBPD < 5 || setting_LCD_VBPD > 50) {
-
-		// Assign default values
-		setting_LCD_VBPD = LCD_VBPD;
-		setting_LCD_VFPD = LCD_VFPD;
-		setting_LCD_VSPW = LCD_VSPW;
-		setting_LCD_HBPD = LCD_HBPD;
-		setting_LCD_HFPD = LCD_HFPD;
-		setting_LCD_HSPW = LCD_HSPW;
-		setting_REFRESH_RATE = REFRESH_RATE;
-		strcpy(setting_ADA_BUY, ADA_BUY);
-
-		EEPROM_ErasePage(EEPROM_START_ADDRESS) == HAL_OK;
-	
-		EEPROM_WriteData(EEPROM_START_ADDRESS, setting_LCD_VBPD);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 4, setting_LCD_VFPD);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 8, setting_LCD_VSPW);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 12, setting_LCD_HBPD);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 16, setting_LCD_HFPD);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 20, setting_LCD_HSPW);
-		EEPROM_WriteData(EEPROM_START_ADDRESS + 24, setting_REFRESH_RATE);
-		EEPROM_Write4CharString(EEPROM_START_ADDRESS + 28, setting_ADA_BUY);
-	
-	}
-
-	// Populate the final vars to be used
-	LCD_VBPD = setting_LCD_VBPD;
-	LCD_VFPD = setting_LCD_VFPD;
-	LCD_VSPW = setting_LCD_VSPW;
-	LCD_HBPD = setting_LCD_HBPD;
-	LCD_HFPD = setting_LCD_HFPD;
-	LCD_HSPW = setting_LCD_HSPW;
-	REFRESH_RATE = setting_REFRESH_RATE;
-	strcpy(ADA_BUY, setting_ADA_BUY);
+	Settings_Load();				// TFT timing settings from the flash page (defaults written there if invalid)
 
 	// ST7701S critical setting
 	if (strcmp(ADA_BUY, "AdaF") == 0) {
@@ -716,6 +187,7 @@ int main(void) {
 		strcpy(ADA_BUY, "AdaF");
 		AdaFruit_Init(); // Default - Initialize AdaFruit driver
 	}
+	boot_panel_ms = HAL_GetTick();
 
 	// TEST sending LT7680 setup info after ST7701S setup
 	//SendAllToLT7680_LT_2();			// run subs to setup LT7680 based on Levetop info
@@ -734,7 +206,8 @@ int main(void) {
 // Main loop initialize
 	
 	// Boot diagnostics: the BluePill speed test and the splash screen, one boot screen before the live display starts.
-	// Only for the first BOOT_DIAG_SHOWS boots; holding DCV at power-up resets the count so they come back.
+	// Only for the first BOOT_DIAG_SHOWS boots (default 0: never); holding DCV at power-up resets the count so they come back.
+#if BOOT_DIAG_SHOWS
 	{
 		uint8_t boots = BootCountRead();
 		if (timingModsOnBoot) {          // DCV held at power-up
@@ -744,11 +217,13 @@ int main(void) {
 		if (boots < BOOT_DIAG_SHOWS) {
 			BootCountIncrement(boots);
 			boot_diag_number = boots + 1;
-			RunBluePillSpeedTestOffline(); // measures, shows the boot screen for BOOT_SCREEN_MS, then clears it
+			RunBluePillSpeedTestOffline(); // measures, shows the boot screen for BOOT_SCREEN_MS
+			ClearScreen();
 		}
 	}
-	ClearScreen(); // Again.....
+#endif
 #if RENDER_VERIFY
+	ClearScreen();
 	Render_ClearCheck();			// the whole page must now read black
 #endif
 
@@ -769,7 +244,6 @@ int main(void) {
 	DWT->CYCCNT = 0;
 	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 #endif
-	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
 	boot_ready_ms = HAL_GetTick();
 #if !FULL_REDRAW
 	uint8_t render_tick = 0;			// the 35 ms tick asks for a render (1 V mode and the periodic repaint need no new frame)
@@ -801,6 +275,9 @@ int main(void) {
 		uint8_t fresh = 0;
 #else
 		uint8_t fresh = Capture_Poll();	// decode a new, stable VFD frame if there is one
+#if TIMING_PROBE
+		if (fresh) { tp_lat_from = cap_decoded_change_cyc; tp_lat_pending = 1; }
+#endif
 #endif
 		(void)fresh;
 
@@ -832,6 +309,7 @@ int main(void) {
 
 #if FULL_REDRAW
 				draws++;
+				if (!first_frame_ms && cap_decodes) first_frame_ms = HAL_GetTick();	// set as the draw starts; it takes ~7 ms
 				if (memchr(&G[1], '?', CHAR_COUNT)) draw_unmatched++;
 #if CAPTURE_LEGACY
 				// Wait for SPI2 to finish any ongoing transfers
@@ -936,247 +414,7 @@ int main(void) {
 #endif
 
 			} else {
-
-				// Timing mode adjust, toggle round TFT LCD timings using DCV button
-				
-				// Read pins A11/A12 - Front panel DCV switch momentary
-				GPIO_PinState pinA11 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
-				GPIO_PinState pinA12 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
-
-				// DCV button pressed
-				if (pinA11 == GPIO_PIN_SET && pinA12 == GPIO_PIN_RESET) {
-					// Button is NOT pressed (normal state)
-					timingModspreviousstate = false;
-				} else if (pinA11 == GPIO_PIN_RESET && pinA12 == GPIO_PIN_RESET && pinA11 == pinA12) {
-					// Button is pressed (both pins are the same, and LOW)
-					if (!timingModspreviousstate) {
-						// Toggle the mode on the first detection of the press
-						timingModsOnBootDCV = !timingModsOnBootDCV;
-
-						// On each press cycle round the various settings
-						// Rotate through the timing settings
-						currentTimingSet = (currentTimingSet + 1) % currentTimingSetNumberentries;  // Cycle through 0 to n
-						// Update the user settings based on the current set
-
-						if (isFirstPress == false) {
-							setting_LCD_VBPD = LCD_VBPD_SETTINGS[currentTimingSet];
-							setting_LCD_VFPD = LCD_VFPD_SETTINGS[currentTimingSet];
-							setting_LCD_VSPW = LCD_VSPW_SETTINGS[currentTimingSet];
-							setting_LCD_HBPD = LCD_HBPD_SETTINGS[currentTimingSet];
-							setting_LCD_HFPD = LCD_HFPD_SETTINGS[currentTimingSet];
-							setting_LCD_HSPW = LCD_HSPW_SETTINGS[currentTimingSet];
-							setting_REFRESH_RATE = REFRESH_RATE_SETTINGS[currentTimingSet];
-							strcpy(setting_ADA_BUY, ADA_BUY_SETTINGS[currentTimingSet]);
-
-							LCD_VBPD = setting_LCD_VBPD;
-							LCD_VFPD = setting_LCD_VFPD;
-							LCD_VSPW = setting_LCD_VSPW;
-							LCD_HBPD = setting_LCD_HBPD;
-							LCD_HFPD = setting_LCD_HFPD;
-							LCD_HSPW = setting_LCD_HSPW;
-							REFRESH_RATE = setting_REFRESH_RATE;
-							strcpy(ADA_BUY, setting_ADA_BUY);
-
-							// run startup subs again to apply new settings
-							AdaFruit_Init();
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LT7680_PLL_Initial_LT();
-							SDRAM_SetRefresh_LT();		// the memory clock follows PCLK, so the refresh interval must too
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_Horizontal_Non_Display_LT(LCD_HBPD);  // Horizontal Back Porch
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_HSYNC_Start_Position_LT(LCD_HFPD);    // HSYNC Start Position
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_HSYNC_Pulse_Width_LT(LCD_HSPW);       // HSYNC Pulse Width
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_Vertical_Non_Display_LT(LCD_VBPD);    // Vertical Back Porch
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_VSYNC_Start_Position_LT(LCD_VFPD);    // VSYNC Start Position
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-							LCD_VSYNC_Pulse_Width_LT(LCD_VSPW);       // VSYNC Pulse Width
-							//HAL_Delay(5);
-							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
-
-							uint8_t bootsKept = BootCountRead();	// the page erase below also clears the boot counter
-							EEPROM_ErasePage(EEPROM_START_ADDRESS) == HAL_OK;		// Erase Flash
-							for (uint8_t b = 0; b < bootsKept; b++) BootCountIncrement(b);
-
-							// Save the updated settings to flash
-							EEPROM_WriteData(EEPROM_START_ADDRESS, setting_LCD_VBPD);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 4, setting_LCD_VFPD);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 8, setting_LCD_VSPW);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 12, setting_LCD_HBPD);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 16, setting_LCD_HFPD);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 20, setting_LCD_HSPW);
-							EEPROM_WriteData(EEPROM_START_ADDRESS + 24, setting_REFRESH_RATE);
-							EEPROM_Write4CharString(EEPROM_START_ADDRESS + 28, setting_ADA_BUY);
-						}
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						SetTextColors(0x00FF00, 0x000000); // Foreground: green, Background: Black
-						ConfigureFontAndPosition(
-							0b00,    // Internal CGROM
-							0b10,    // Font size
-							0b00,    // ISO 8859-1
-							0,       // Full alignment enabled
-							0,       // Chroma keying disabled
-							1,       // Rotate 90 degrees counterclockwise
-							0b00,    // Width multiplier
-							0b00,    // Height multiplier
-							1,       // Line spacing
-							4,       // Character spacing
-							140,     // Cursor X
-							0      // Cursor Y
-						);
-						char text1[] = "TFT LCD Timing Adjust";
-						DrawText(text1);
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						SetTextColors(0xFFFFFF, 0x000000); // Foreground: green, Background: Black
-						ConfigureFontAndPosition(
-							0b00,    // Internal CGROM
-							0b01,    // Font size
-							0b00,    // ISO 8859-1
-							0,       // Full alignment enabled
-							0,       // Chroma keying disabled
-							1,       // Rotate 90 degrees counterclockwise
-							0b00,    // Width multiplier
-							0b00,    // Height multiplier
-							1,       // Line spacing
-							4,       // Character spacing
-							170,     // Cursor X
-							0      // Cursor Y
-						);
-						char text2[] = "Hit DCV to cycle round new TFT LCD settings";
-						DrawText(text2);
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						ConfigureFontAndPosition(
-							0b00,    // Internal CGROM
-							0b01,    // Font size
-							0b00,    // ISO 8859-1
-							0,       // Full alignment enabled
-							0,       // Chroma keying disabled
-							1,       // Rotate 90 degrees counterclockwise
-							0b00,    // Width multiplier
-							0b00,    // Height multiplier
-							1,       // Line spacing
-							4,       // Character spacing
-							195,     // Cursor X
-							0      // Cursor Y
-						);
-						char text3[] = "Power cycle may be necessary to achieve full effect";
-						DrawText(text3);
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						ConfigureFontAndPosition(
-							0b00,    // Internal CGROM
-							0b01,    // Font size
-							0b00,    // ISO 8859-1
-							0,       // Full alignment enabled
-							0,       // Chroma keying disabled
-							1,       // Rotate 90 degrees counterclockwise
-							0b00,    // Width multiplier
-							0b00,    // Height multiplier
-							1,       // Line spacing
-							4,       // Character spacing
-							250,     // Cursor X
-							0       // Cursor Y
-						);
-						char text4[] = "        VBPD VFPD VSPW HBPD HFPD HSPW REFR COG";
-						DrawText(text4);
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						SetTextColors(0xFFFF00, 0x000000); // Foreground: Yellow, Background: Black
-						ConfigureFontAndPosition(
-							0b00,    // Internal CGROM
-							0b01,    // Font size
-							0b00,    // ISO 8859-1
-							0,       // Full alignment enabled
-							0,       // Chroma keying disabled
-							1,       // Rotate 90 degrees counterclockwise
-							0b00,    // Width multiplier
-							0b00,    // Height multiplier
-							1,       // Line spacing
-							4,       // Character spacing
-							275,     // Cursor X
-							0      // Cursor Y
-						);
-						char redefineValuesCurr[128]; // Ensure the buffer is large enough
-						snprintf(redefineValuesCurr, sizeof(redefineValuesCurr),
-							"CURRENT %d   %d   %d    %d   %d   %d   %d   %s",
-							boot_LCD_VBPD,
-							boot_LCD_VFPD,
-							boot_LCD_VSPW,
-							boot_LCD_HBPD,
-							boot_LCD_HFPD,
-							boot_LCD_HSPW,
-							boot_REFRESH_RATE,
-							boot_ADA_BUY
-						);
-						DrawText(redefineValuesCurr);
-
-						//HAL_Delay(6);
-						Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-						if (isFirstPress == false) {
-							SetTextColors(0x00FF00, 0x000000); // Foreground: Yellow, Background: Black
-							ConfigureFontAndPosition(
-								0b00,    // Internal CGROM
-								0b01,    // Font size
-								0b00,    // ISO 8859-1
-								0,       // Full alignment enabled
-								0,       // Chroma keying disabled
-								1,       // Rotate 90 degrees counterclockwise
-								0b00,    // Width multiplier
-								0b00,    // Height multiplier
-								1,       // Line spacing
-								4,       // Character spacing
-								300,     // Cursor X
-								0      // Cursor Y
-							);
-							char redefineValues[128]; // Ensure the buffer is large enough
-							snprintf(redefineValues, sizeof(redefineValues),
-								"NEW     %d   %d   %d    %d   %d   %d   %d   %s",
-								setting_LCD_VBPD,
-								setting_LCD_VFPD,
-								setting_LCD_VSPW,
-								setting_LCD_HBPD,
-								setting_LCD_HFPD,
-								setting_LCD_HSPW,
-								setting_REFRESH_RATE,
-								setting_ADA_BUY
-							);
-							DrawText(redefineValues);
-						}
-
-						// Delay for button
-						//HAL_Delay(120);
-						Delay_NonBlocking(120);  // Wait ms in a non-blocking way
-
-					}
-
-					timingModspreviousstate = true;		// Update the previous state
-					isFirstPress = false;				// Reset the flag after the first press
-				}
-
+				TimingAdjust_Poll();		// timing-adjust mode (DCV held at power-up), settings.c
 			}
 			
 
@@ -1208,6 +446,7 @@ int main(void) {
 			else tp_lat_pending = 0;     // the decoded change did not alter the text
 #endif
 			if (drew) {
+				if (!first_frame_ms && cap_decodes) first_frame_ms = HAL_GetTick();
 				draws++;
 				if (memchr(&G[1], '?', CHAR_COUNT)) draw_unmatched++;
 			}
@@ -1252,99 +491,6 @@ void RunBluePillSpeedTestOffline(void)
 	DisplayBootScreen(boot_diag_number, BOOT_DIAG_SHOWS);   // speed result + credits + timing settings + boot n/N
 
 	HAL_Delay(BOOT_SCREEN_MS);
-}
-
-
-void RunBluePillSpeedTestOnline(void)
-{
-	// BluePill clone determination/test - Loops per sec is displayed on the TFT for 2secs at boot. Examples: Good board = 43596, Bad board = 849
-	if (!dbg_loop_test_done)
-	{
-		dbg_loop_count++;
-		uint32_t loop_now = HAL_GetTick();
-		if ((loop_now - dbg_loop_last_ms) >= 1000)
-		{
-			dbg_loop_per_sec = dbg_loop_count;
-			dbg_loop_test_done = 1; // stop further testing
-			DisplayCloneDeterminationAux();
-			HAL_Delay(2000);
-		}
-	}
-}
-
-
-// Write uint32_t to EEprom (Flash)
-HAL_StatusTypeDef EEPROM_WriteData(uint32_t address, uint32_t data) {
-	if (address < EEPROM_START_ADDRESS || address >= (EEPROM_START_ADDRESS + EEPROM_PAGE_SIZE)) {
-		return HAL_ERROR; // Address out of range
-	}
-	HAL_FLASH_Unlock();
-	HAL_StatusTypeDef status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address, data);
-	HAL_FLASH_Lock();
-	return status;
-}
-
-
-// Write CHAR string to EEprom (Flash), 4 chars max
-HAL_StatusTypeDef EEPROM_Write4CharString(uint32_t address, const char* str) {
-	if (strlen(str) > 4) {
-		return HAL_ERROR; // Limit the string length to 4 characters
-	}
-
-	uint32_t data = 0;
-
-	// Copy up to 4 characters into a 32-bit word
-	memcpy(&data, str, 4);
-
-	HAL_FLASH_Unlock();
-	HAL_StatusTypeDef status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address, data);
-	HAL_FLASH_Lock();
-
-	return status;
-}
-
-
-// Read uint32_t from EEProm (Flash)
-uint32_t EEPROM_ReadData(uint32_t address) {
-	if (address < EEPROM_START_ADDRESS || address >= (EEPROM_START_ADDRESS + EEPROM_PAGE_SIZE)) {
-		return 0xFFFFFFFF; // Invalid address
-	}
-	return *(uint32_t*)address;
-}
-
-
-// Read CHAR string from EEprom (Flash), 4 chars max
-void EEPROM_Read4CharString(uint32_t address, char* buffer) {
-	uint32_t data = *(uint32_t*)address; // Read the 32-bit word
-
-	// Copy the data into the buffer
-	memcpy(buffer, &data, 4);
-
-	// Ensure the string is null-terminated
-	buffer[4] = '\0';
-}
-
-
-
-// Erase EEprom (Flash) - necessary before write
-HAL_StatusTypeDef EEPROM_ErasePage(uint32_t address) {
-	if (address < EEPROM_START_ADDRESS || address >= (EEPROM_START_ADDRESS + EEPROM_PAGE_SIZE)) {
-		return HAL_ERROR; // Address out of range
-	}
-
-	HAL_FLASH_Unlock();
-
-	FLASH_EraseInitTypeDef eraseInit;
-	uint32_t pageError;
-
-	eraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
-	eraseInit.PageAddress = address;
-	eraseInit.NbPages = 1; // Erase a single page
-
-	HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&eraseInit, &pageError);
-
-	HAL_FLASH_Lock();
-	return status;
 }
 
 
@@ -1417,37 +563,3 @@ void assert_failed(uint8_t* file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-
-//**************************************************************************************************
-// Boot counter in the settings page
-//
-// Flash bits can be cleared without erasing the page, so each boot programs the next unused (0xFFFFFFFF) marker word to 0.
-// The count is the number of programmed markers. Anything that erases the settings page (timing mode, first-boot defaults,
-// the DCV-held reset below) also clears the markers, which restarts the count.
-
-static uint8_t BootCountRead(void) {
-	uint8_t n = 0;
-	for (uint8_t i = 0; i < BOOT_MARKER_WORDS; i++) {
-		if (EEPROM_ReadData(EEPROM_START_ADDRESS + BOOT_MARKER_OFFSET + 4u * i) == 0xFFFFFFFFu) break;
-		n++;
-	}
-	return n;
-}
-
-static void BootCountIncrement(uint8_t count) {
-	if (count < BOOT_MARKER_WORDS)
-		EEPROM_WriteData(EEPROM_START_ADDRESS + BOOT_MARKER_OFFSET + 4u * count, 0x00000000u);
-}
-
-// Erase the page and write the current TFT timing settings straight back, which clears the markers.
-static void BootCountReset(void) {
-	EEPROM_ErasePage(EEPROM_START_ADDRESS);
-	EEPROM_WriteData(EEPROM_START_ADDRESS, setting_LCD_VBPD);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 4, setting_LCD_VFPD);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 8, setting_LCD_VSPW);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 12, setting_LCD_HBPD);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 16, setting_LCD_HFPD);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 20, setting_LCD_HSPW);
-	EEPROM_WriteData(EEPROM_START_ADDRESS + 24, setting_REFRESH_RATE);
-	EEPROM_Write4CharString(EEPROM_START_ADDRESS + 28, setting_ADA_BUY);
-}

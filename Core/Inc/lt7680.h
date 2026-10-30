@@ -15,7 +15,6 @@
 #include <stdint.h>
 
 void LCDConfigTurnOff_LT(void);
-void Ohms12x24SymbolStoreUCG(void);
 
 //void DrawText(const char* text);
 
@@ -47,9 +46,6 @@ void FillSDRAMWithColorIntegrated(void);
 void FillDisplayRAM(void);
 
 // LT7680 Commands and Configuration
-void SoftwareReset(void);
-void SetBacklightFull(void);
-void FillScreen(uint32_t color);
 uint8_t SendAllToLT7680_LT(void);          // returns LT_FAULT_* bits
 //void SetBackgroundColor(color);
 void Text_Mode(void);
@@ -81,7 +77,6 @@ void PWM_Prescaler_LT(void);
 void PWM_Clock_Mux_LT(void);
 void PWM_Configuration_LT(void);
 void Software_Reset_LT(void);
-void Software_ResetPLL_LT(void);
 void Set_MISA_LT(void);
 void SetMainImageWidth_LT(void);
 void SetMainWindowUpperLeftX_LT(void);
@@ -92,6 +87,10 @@ void ResetGraphicWritePosition_LT(void);
 void SetGraphicRWYCoordinate_LT(void);
 void SetCanvasStartAddress_LT(void);
 void SetCanvasImageWidth_LT(void);
+void SetCanvasStart32_LT(uint32_t a);   // canvas start address REG[50h-53h] (glyph load, soak, bus test)
+void Text_Mode(void);
+void Graphics_Mode(void);
+void SetTextColors(uint32_t foreground, uint32_t background);
 //void ClearScreen(void);
 
 void DrawLine(uint16_t startX, uint16_t startY,uint16_t endX, uint16_t endY,uint16_t colorRED, uint16_t colorGREEN, uint16_t colorBLUE);
@@ -187,7 +186,10 @@ extern uint32_t lt_pclk_khz;
 #define LT_IDLE_TIMEOUT_MS		200u		// after a reset, status bit 1 (inhibit) must clear within this
 #define LT_PLL_TIMEOUT_MS		10u			// REG[00h] bit 7 must read 1 (running on the PLLs) within this
 #define LT_INIT_TRIES			2u			// a failed init is retried once with a hardware reset
-#define BOOT_SETTLE_MS			1000u		// wait before the LT7680 set-up (Ian's; purpose unknown, a candidate to trim)
+#ifndef BOOT_SETTLE_MS
+#define BOOT_SETTLE_MS			20u			// wait before the LT7680 set-up. Ian had 1000 ms for no stated reason; the reset and
+											// idle waits now poll with timeouts and retry, so this only gives the supplies a moment
+#endif
 #define LT_FAULT_SHOW_MS		3000u		// how long an init fault line stays up
 // Bus layer (Stage 5 of docs/REWORK-PLAN.md). LT_BUS_HAL=1 restores Ian's HAL byte functions (and 9 MHz) for A/B comparison.
 #ifndef LT_BUS_HAL
@@ -253,8 +255,6 @@ extern volatile uint8_t lt_resets;			// hardware resets since power-up
 
 // --- Added prototypes (needed by display.c/main.c and for calls before definitions) ---
 void LCDConfigTurnOn_LT(void);
-
-void Ohms16x32SymbolStoreUCG(void);
 
 void ConfigureFontAndPosition(uint8_t fontSource,
     uint8_t characterHeight,

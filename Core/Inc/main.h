@@ -22,11 +22,10 @@ extern "C" {
 
 void Delay_NonBlocking(uint32_t delayMs);
 
-HAL_StatusTypeDef EEPROM_WriteData(uint32_t address, uint32_t data);				// Prototype for uint32_t write
-uint32_t EEPROM_ReadData(uint32_t address);											// Prototype for uint32_t read
-HAL_StatusTypeDef EEPROM_Write4CharString(uint32_t address, const char* str);		// Prototype for CHAR write
-void EEPROM_Read4CharString(uint32_t address, char* buffer);						// Prototype for CHAR read
-HAL_StatusTypeDef EEPROM_ErasePage(uint32_t address);								// Prototype for Erase
+// TIMING_PROBE=1: cycle-count timing variables (tp_*, main.c) readable over SWD
+#ifndef TIMING_PROBE
+#define TIMING_PROBE 0
+#endif
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
