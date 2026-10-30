@@ -16,6 +16,9 @@ Status (2026-10-30):
   capture ([results](#stage-4-results-2026-10-30)).
 - **Stage 5 done:** the redraw takes 6.6 ms instead of 15.0, and the live display starts at 1.6 s
   ([results](#stage-5-results-2026-10-30)). Bursts of data bytes in one chip-select frame work.
+- **Stage 6 done:** only changed cells are drawn, as soon as a stable frame arrives. A change reaches the screen in
+  10.7 ms on average instead of 32.6, and the screen read back from display memory matches Ian's full redraw pixel for
+  pixel ([results](#stage-6-results-2026-10-30)).
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 - Later stages not started.
 
@@ -316,7 +319,9 @@ To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to
 3. Timing-adjust mode (hold DCV at power-up): step through all 6 sets, and check the boot count survives.
 4. DISPLAY OFF for 60 minutes, then on: the whole panel is clean, including the left edge and the gaps between rows.
 5. Ohms screen after an hour on another screen: the ohm glyph is intact.
-6. Whether the right-edge wipe is still needed (Stage 6).
+6. Right edge (Stage 6): the wipe is off by default. Display memory there reads black in every check, so anything
+   still seen at the edge would not come from memory content. Look for it anyway; `-DEDGE_WIPE=1` brings the wipe back
+   on full repaints.
 7. Glyph self-test pages and a menu walk, compared with the photos of the current build.
 8. Boot (Stage 3): the panel comes up cleanly with the shorter reset and without the fixed gaps; no flash of garbage.
 9. Menu walk with `menu_logger.py` (Stage 5 asked for it): it needs someone at the front panel, but not the panel
@@ -538,6 +543,60 @@ Goal: draw only what changed, as soon as a stable frame arrives.
   - 240 fps video for latency and tearing
   - an overnight run on a changing reading (autorange stepping, statistics screen)
 
+#### Stage 6 results (2026-10-30)
+
+What was built:
+
+- **`Render_Update()`** (`display.c`): builds the main and aux lines exactly as `DisplayMain()` and `DisplayAux()` do,
+  including the 1 V mode and the ohm and sigma glyphs. It compares them cell by cell with what it last drew, and draws
+  each run of changed cells at `y0 + i x pitch`. Only the annunciators that changed are drawn.
+  - **Full redraw** the first time, after DISPLAY OFF, when a colour changes, and every `FULL_REDRAW_MS` (10 s).
+  - **When it runs:** as soon as `Capture_Poll()` decodes a new stable frame. The 35 ms tick still reads the DCV button
+    and calls it too, so a 1 V mode toggle is drawn without a new frame. An unchanged screen costs no SPI traffic.
+- **Removed from the live loop:** the 6 ms wait, and the redraw of everything every tick.
+- **Right-edge wipe:** off. `-DEDGE_WIPE=1` brings it back before each full repaint. It can't stay on every draw: rows
+  952-955 are part of the last aux cell, which a partial draw doesn't repaint.
+- **Primitives:**
+  - `DrawLine()` waits for the drawing engine before it returns.
+  - `ClearScreen()` is one filled rectangle from the drawing engine (`76h`); `-DLT_CLEAR_TEXT=1` restores the spaces.
+- **Refactors on the way:**
+  - The glyph line drawer takes a cell range (`DrawCells`).
+  - The 1 V conversion is its own function (`MainToOneVolt`).
+  - Each annunciator draws through `DrawAnnunciator()`.
+  - Ian's `DisplayMain/Aux/Annunciators` still exist: the glyph self-test, `FULL_REDRAW=1` and the check below use them.
+- **Build options:** `FULL_REDRAW=1` (Ian's loop, for A/B), `FULL_REDRAW_MS`, `EDGE_WIPE`, `LT_CLEAR_TEXT`, and
+  `RENDER_VERIFY` (bench).
+
+Bench, no panel needed. `-DRENDER_VERIFY=1` reads display memory back over SPI (`LT_ReadPixels`):
+
+- **The engine draws the same pixels as Ian's full redraw.**
+  - **Method:** hash the screen in three bands (annunciators, main, aux; memory X 128-351, all 960 rows), redraw
+    everything with Ian's functions, and hash again.
+  - **Self-test:** 60 random synthetic screens before the live loop. The changes mix digits, letters, the ohm and sigma
+    placeholders, the micro sign, whole new lines and annunciator toggles. 0 mismatches, 654 cells drawn.
+  - **Live:** 12 checks against the meter's own changing reading. 0 mismatches.
+- **Right edge:** with the wipe off, memory rows 952-959 had no lit pixel outside the text cells that reach them, in 72
+  checks.
+- **`ClearScreen()`:** after the rectangle fill, all 384,000 pixels of the page read black.
+- **Drawing engine:** `DrawLine` and `ClearScreen` waits had 0 timeouts, and `WaitForLT7680Ready` 0 timeouts.
+- **Capture (5 minutes each, `-O0` and `-O2`):** 0 short frames, 0 unmatched decodes, 0 redraws with a `?`.
+  - Redraws: 5.9 per second, one per decoded change, against about 28 for the tick-driven loop.
+  - Main-loop passes at `-O2`: 1.66 M per second (Stage 4: 1.22 M); at `-O0` 0.63 M (Stage 4: 0.22 M).
+- **Timing** (`TIMING_PROBE`, -O2, 72 MHz, about 45 s live each). Latency runs from the end of the first frame that
+  shows a change to the end of its draw; the stable-frame rule alone accounts for one frame (about 9 ms).
+
+  | | `FULL_REDRAW=1` (Ian's loop) | Stage 6 |
+  |---|---|---|
+  | Redraw, min / last / max (ms) | 2.9 / 6.8 / 6.9 | 0.17 / 1.1 / 6.2 (the max is the 10 s full repaint) |
+  | Whole timed block, max (ms) | 12.9 | (no block) |
+  | Change-to-screen latency, min / avg / max (ms) | 16.8 / 32.6 / 50.7 | 10.3 / 10.7 / 14.8 |
+  | Redraws per second | 29 | 6 |
+
+  A typical change (the last digits of the reading and a blinking annunciator) is 3 or 4 cells and about 1 ms of drawing.
+
+Still to do with the panel visible: the glyph self-test pages, the menu walk, 240 fps video of latency and tearing, and
+an overnight run on a changing reading. These are in the deferred checks.
+
 ### Stage 7: structure and clean-up
 
 - Split the files into the modules in [Target structure](#target-structure).
@@ -570,5 +629,5 @@ Run for every stage that ships an image:
 | Are the reset timing-bank values right for this SDRAM at 100 MHz? | dump + soak at the Stage 2 clocks | whether Stage 1 writes the timing bank |
 | Multi-byte data after one control byte in a CS frame | Stage 5 experiment | glyph and memory-write speed |
 | Highest reliable SPI1 clock on this wiring | Stage 5 scope + readback loop | bus speed |
-| Cause of the right-edge "random pixels" | Stage 6 with the wipe off | whether the wipe stays |
+| ~~Cause of the right-edge "random pixels"~~ | **Answered in memory:** with the wipe off, rows 952-959 read black in 72 checks; the panel itself is still to be seen | wipe off by default (`EDGE_WIPE`) |
 | Is the per-character `WaitForLT7680Ready()` needed, or is the write-FIFO-full bit (status bit 7) enough? | Stage 5 | text speed |

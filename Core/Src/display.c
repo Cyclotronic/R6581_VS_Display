@@ -31,7 +31,7 @@ uint32_t AnnunColourFore = 0x00FF00; // Green
 uint32_t BackgroundColour = 0x000000; // Black
 uint32_t AuxColourForeLS = 0xA0A0A0; // Grey
 
-static void CheckDisplayStatus(void);
+static uint8_t CheckDisplayStatus(void);
 
 //******************************************************************************
 // Custom glyph drawing
@@ -69,10 +69,11 @@ static int HasGlyph(const char* s, int n)
 	return 0;
 }
 
-static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
+// Draw cells from..to-1 of a line (cell i at y0 + i * pitch).
+static void DrawCells(const char* s, int from, int to, const LineFmt* f)
 {
-	int i = 0;
-	while (i < n && s[i]) {
+	int i = from;
+	while (i < to && s[i]) {
 		int code = GlyphCodeFor(s[i]);
 		if (code >= 0) {
 			SetCGRAMStart_LT(f->cgram);
@@ -88,7 +89,7 @@ static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
 		} else {
 			char seg[32];
 			int len = 0;
-			while (i + len < n && s[i + len] && GlyphCodeFor(s[i + len]) < 0 && len < 31) { seg[len] = s[i + len]; len++; }
+			while (i + len < to && s[i + len] && GlyphCodeFor(s[i + len]) < 0 && len < 31) { seg[len] = s[i + len]; len++; }
 			seg[len] = '\0';
 			ConfigureFontAndPosition(
 				0b00,    // built-in font
@@ -98,6 +99,11 @@ static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
 			i += len;
 		}
 	}
+}
+
+static void DrawLineWithGlyphs(const char* s, int n, const LineFmt* f)
+{
+	DrawCells(s, 0, n, f);
 }
 
 
@@ -115,6 +121,67 @@ extern volatile uint32_t dbg_loop_per_sec;
 //uint16_t dollarPositionAUX = 0xFFFF;
 
 //************************************************************************************************************************************************************
+
+
+// 1 V mode (ONE_VOLT_MODE): "+ 999.99709   mVDC" becomes "+ 0.99999709   VDC". s holds the 18 main characters.
+static void MainToOneVolt(char s[19])
+{
+	// Extract the numerical part, divide by 1000 all whilst remainng string data
+	char prefix[19] = { 0 };       // To store the string before the numeric part
+	char numericPart[13] = { 0 };  // To store the numeric part
+	char suffix[] = "VDC";         // Fixed suffix
+	char result[13] = { 0 };       // To store the transformed numeric part
+
+	// Extract the prefix (including the sign) before the numeric part
+	sscanf(s, "%[^0-9]", prefix);
+
+	// Extract the numeric part (ignoring the sign)
+	sscanf(s, "%*[^0-9]%12s", numericPart);
+
+	// Find the position of the decimal point
+	char* dot = strchr(numericPart, '.');
+	int integerLength = dot ? (dot - numericPart) : strlen(numericPart); // Length of the integer part
+
+	// Rebuild the result by dividing the value by 1000
+	int resultIndex = 0;
+	if (integerLength > 3) {
+		// Copy digits before the new decimal point
+		for (int i = 0; i < integerLength - 3; i++) {
+			result[resultIndex++] = numericPart[i];
+		}
+		result[resultIndex++] = '.'; // Add the decimal point
+
+		// Copy the remaining digits from the original integer part
+		for (int i = integerLength - 3; i < integerLength; i++) {
+			result[resultIndex++] = numericPart[i];
+		}
+	}
+	else {
+		// For numbers smaller than 1000, prepend "0." and leading zeros
+		result[resultIndex++] = '0';
+		result[resultIndex++] = '.';
+		for (int i = 0; i < 3 - integerLength; i++) {
+			result[resultIndex++] = '0';
+		}
+		// Copy the entire integer part
+		for (int i = 0; i < integerLength; i++) {
+			result[resultIndex++] = numericPart[i];
+		}
+	}
+
+	// Copy the fractional part after the decimal point
+	if (dot) {
+		strcpy(result + resultIndex, dot + 1);
+	}
+
+	// Clear and rebuild s
+	memset(s, ' ', 18);  // Fill with spaces
+	s[18] = '\0';        // Null-terminate the string
+	s[0] = prefix[0];    // Set the sign (+ or -) at position 0
+	s[1] = ' ';          // Add space after the sign
+	strncpy(s + 2, result, strlen(result));            // Copy numericPart starting at position 2
+	strncpy(s + 18 - strlen(suffix), suffix, strlen(suffix)); // Add the suffix
+}
 
 
 void DisplayMain() {
@@ -171,96 +238,8 @@ void DisplayMain() {
 				MaindisplayString[i - 1] = G[i];          // Copy characters
 			}
 
-			// Extract the numerical part, divide by 1000 all whilst remainng string data
-			char prefix[19] = { 0 };       // To store the string before the numeric part
-			char numericPart[13] = { 0 };  // To store the numeric part
-			char suffix[] = "VDC";         // Fixed suffix
-			char result[13] = { 0 };       // To store the transformed numeric part
+			MainToOneVolt(MaindisplayString);
 
-			// Extract the prefix (including the sign) before the numeric part
-			sscanf(MaindisplayString, "%[^0-9]", prefix);
-
-			// Extract the numeric part (ignoring the sign)
-			sscanf(MaindisplayString, "%*[^0-9]%12s", numericPart);
-
-			// Find the position of the decimal point
-			char* dot = strchr(numericPart, '.');
-			int integerLength = dot ? (dot - numericPart) : strlen(numericPart); // Length of the integer part
-
-			// Rebuild the result by dividing the value by 1000
-			int resultIndex = 0;
-			if (integerLength > 3) {
-				// Copy digits before the new decimal point
-				for (int i = 0; i < integerLength - 3; i++) {
-					result[resultIndex++] = numericPart[i];
-				}
-				result[resultIndex++] = '.'; // Add the decimal point
-
-				// Copy the remaining digits from the original integer part
-				for (int i = integerLength - 3; i < integerLength; i++) {
-					result[resultIndex++] = numericPart[i];
-				}
-			}
-			else {
-				// For numbers smaller than 1000, prepend "0." and leading zeros
-				result[resultIndex++] = '0';
-				result[resultIndex++] = '.';
-				for (int i = 0; i < 3 - integerLength; i++) {
-					result[resultIndex++] = '0';
-				}
-				// Copy the entire integer part
-				for (int i = 0; i < integerLength; i++) {
-					result[resultIndex++] = numericPart[i];
-				}
-			}
-
-			// Copy the fractional part after the decimal point
-			if (dot) {
-				strcpy(result + resultIndex, dot + 1);
-			}
-
-			// Clear and rebuild MaindisplayString
-			memset(MaindisplayString, ' ', 18);  // Fill with spaces
-			MaindisplayString[18] = '\0';        // Null-terminate the string
-			MaindisplayString[0] = prefix[0];    // Set the sign (+ or -) at position 0
-			MaindisplayString[1] = ' ';          // Add space after the sign
-			strncpy(MaindisplayString + 2, result, strlen(result));            // Copy numericPart starting at position 2
-			strncpy(MaindisplayString + 18 - strlen(suffix), suffix, strlen(suffix)); // Add the suffix
-
-			/*
-			// atof test - needs work, not working
-			// atof works, but after that string is empty for some reason
-			float voltage;
-			voltage = (atof(numericPart)) / 1000;
-			// Format voltage into a string
-			//char result2[12]; // Enough to hold the formatted voltage
-			//snprintf(result2, sizeof(result2), "%.3f", voltage); // Format voltage to 3 decimal places
-			//test16[12] = result2;
-	
-			char voltageString[12];
-			snprintf(voltageString, sizeof(voltageString), "%.8f", voltage);
-			test16[12] = voltageString[12];
-
-			// Clear and rebuild MaindisplayString
-			memset(MaindisplayString, ' ', 18);  // Fill with spaces
-			MaindisplayString[18] = '\0';        // Null-terminate the string
-
-			// Add the prefix (including the sign)
-			if (prefix[0] != '\0') {
-				MaindisplayString[0] = prefix[0];    // Set the sign (+ or -) at position 0
-			}
-
-			// Add a space after the sign
-			MaindisplayString[1] = ' ';
-
-			// Add the formatted numeric part
-			strncpy(MaindisplayString + 2, voltageString, strlen(voltageString)); // Copy numeric part starting at position 2
-
-			// Add the suffix at the end
-			if (suffix[0] != '\0') {
-				strncpy(MaindisplayString + 18 - strlen(suffix), suffix, strlen(suffix));
-			}
-			*/
 
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
@@ -319,7 +298,8 @@ void DisplayMain() {
 
 
 // "DISPLAY OFF" logic
-void CheckDisplayStatus() {
+uint8_t CheckDisplayStatus() {
+	uint8_t turnedOn = 0;	// 1 = the display has just come back on: the caller redraws everything
 
 	// Check if "DISPLAY OFF" is present in MaindisplayString
 	displayBlank = (strstr(MaindisplayString, "DISPLAY OFF") != NULL);
@@ -336,12 +316,13 @@ void CheckDisplayStatus() {
 			ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 			LCDConfigTurnOn_LT();
 			LoadCustomGlyphs_LT();    // glyph memory is reloaded after DISPLAY OFF
+			turnedOn = 1;
 		}
 	}
 
 	// Update the previous status
 	displayBlankPrevious = displayBlank;
-
+	return turnedOn;
 }
 
 
@@ -444,83 +425,283 @@ void DisplayAux() {
 
 //******************************************************************************
 
+// ANNUNCIATORS
+static const char* const AnnuncNames[18] = {
+	"SMPL", "IDLE", "AUTO", "LOP", "NULL", "DFILT", "MATH", "AZERO",
+	"ERROR", "", "FRONT", "REAR", "", "LO_G", "RMT", "TLK",   // ERR shown as ERROR; INFO and SLOT are unused per the manual and left blank (they share a position)
+	"LTN", "SRQ"
+};
+
+// Y position of each annunciator: labels run one after another in 12 px character cells (24-dot font) with a
+// gap between names. INFO and SLOT are blank and share the position of FRONT / LO_G. Layout after Hydron's display.c.
+#define ANN_CELL 12
+#define ANN_GAP  13
+#define ANN_Y(chars, gaps) (Ypos_ANNUC + (chars) * ANN_CELL + (gaps) * ANN_GAP)
+static const uint16_t AnnuncYCoords[18] = {
+	ANN_Y(0, 0),    // SMPL
+	ANN_Y(4, 1),    // IDLE
+	ANN_Y(8, 2),    // AUTO
+	ANN_Y(12, 3),   // LOP
+	ANN_Y(15, 4),   // NULL
+	ANN_Y(19, 5),   // DFILT
+	ANN_Y(24, 6),   // MATH
+	ANN_Y(28, 7),   // AZERO
+	ANN_Y(33, 8),   // ERROR
+	ANN_Y(38, 9),   // INFO (blank)
+	ANN_Y(38, 9),   // FRONT
+	ANN_Y(43, 10),  // REAR
+	ANN_Y(47, 11),  // SLOT (blank)
+	ANN_Y(47, 11),  // LO_G
+	ANN_Y(51, 12),  // RMT
+	ANN_Y(54, 13),  // TLK
+	ANN_Y(57, 14),  // LTN
+	ANN_Y(60, 15)   // SRQ
+};
+
+// One annunciator: ON in the annunciator colour (ERROR in red), OFF as its name drawn in black over itself
+static void DrawAnnunciator(int i, _Bool on)
+{
+	SetTextColors(on ? ((i == 8) ? 0xFF0000 : AnnunColourFore) : 0x000000, 0x000000); // Foreground, Background: Black
+	ConfigureFontAndPosition(
+		0b00,    // Internal CGROM
+		0b01,    // 24-dot font size (12 px wide, x2 tall = 12x48)
+		0b00,    // ISO 8859-1
+		0,       // Full alignment enabled
+		0,       // Chroma keying disabled
+		1,       // Rotate 90 degrees counterclockwise
+		0b00,    // Width X0
+		0b01,    // Height X0
+		5,       // Line spacing
+		0,       // Character spacing
+		Xpos_ANNUNC,  // Cursor X (fixed)
+		AnnuncYCoords[i] // Cursor Y (from array)
+	);
+	DrawText(AnnuncNames[i]);
+}
+
 void DisplayAnnunciators() {
-
-	// ANNUNCIATORS - Print or clear text on the LCD
-	const char* AnnuncNames[19] = {
-		"SMPL", "IDLE", "AUTO", "LOP", "NULL", "DFILT", "MATH", "AZERO",
-		"ERROR", "", "FRONT", "REAR", "", "LO_G", "RMT", "TLK",   // ERR shown as ERROR; INFO and SLOT are unused per the manual and left blank (they share a position)
-		"LTN", "SRQ"
-	};
+	for (int i = 0; i < 18; i++) DrawAnnunciator(i, Annunc[i + 1]);
+}
 
 
-	// Y position of each annunciator: labels run one after another in 12 px character cells (24-dot font) with a
-	// gap between names. INFO and SLOT are blank and share the position of FRONT / LO_G. Layout after Hydron's display.c.
-	#define ANN_CELL 12
-	#define ANN_GAP  13
-	#define ANN_Y(chars, gaps) (Ypos_ANNUC + (chars) * ANN_CELL + (gaps) * ANN_GAP)
-	int AnnuncYCoords[19] = {
-		ANN_Y(0, 0),    // SMPL
-		ANN_Y(4, 1),    // IDLE
-		ANN_Y(8, 2),    // AUTO
-		ANN_Y(12, 3),   // LOP
-		ANN_Y(15, 4),   // NULL
-		ANN_Y(19, 5),   // DFILT
-		ANN_Y(24, 6),   // MATH
-		ANN_Y(28, 7),   // AZERO
-		ANN_Y(33, 8),   // ERROR
-		ANN_Y(38, 9),   // INFO (blank)
-		ANN_Y(38, 9),   // FRONT
-		ANN_Y(43, 10),  // REAR
-		ANN_Y(47, 11),  // SLOT (blank)
-		ANN_Y(47, 11),  // LO_G
-		ANN_Y(51, 12),  // RMT
-		ANN_Y(54, 13),  // TLK
-		ANN_Y(57, 14),  // LTN
-		ANN_Y(60, 15)   // SRQ
-	};
+//******************************************************************************
+// Redraw engine (Stage 6 of docs/REWORK-PLAN.md)
+//
+// Render_Update() builds the main and aux lines exactly as DisplayMain() and DisplayAux() draw them, compares them cell by
+// cell with what it drew last, and draws only the runs of cells that changed, and only the annunciators that changed.
+// Everything is drawn the first time, after DISPLAY OFF, when a colour changes, and when the caller asks (main.c repaints
+// everything every FULL_REDRAW_MS). Returns 1 if it drew anything.
 
+static struct {
+	char main[LINE1_LEN];
+	char aux[LINE2_LEN];
+	_Bool ann[18];
+	uint32_t mainCol, auxCol, annCol;
+	uint8_t valid;
+} shown;
 
+volatile uint32_t render_calls, render_draws, render_full, render_runs, render_cells, render_ann;
+
+// The main line as DisplayMain() draws it. Returns 1 for the plain-text case, the only one where DISPLAY OFF is checked.
+static uint8_t BuildMain(char m[LINE1_LEN + 1])
+{
+	for (int i = 1; i <= LINE1_LEN; i++) MaindisplayString[i - 1] = G[i];
+	MaindisplayString[LINE1_LEN] = '\0';
+	memcpy(m, MaindisplayString, LINE1_LEN + 1);
+	if (HasGlyph(m, LINE1_LEN)) return 0;
+	if (oneVoltmode && onethousandmVmodedetected && (strstr(m, "OVERLOAD") == NULL) && (strpbrk(m, "0123456789") != NULL)) {
+		MainToOneVolt(m);
+		return 0;
+	}
+	return 1;
+}
+
+// The aux line as DisplayAux() draws it; also sets onethousandmVmodedetected, as DisplayAux() does
+static void BuildAux(char a[LINE2_LEN + 1])
+{
+	for (int i = 0; i < LINE2_LEN; i++) a[i] = G[LINE1_LEN + 1 + i];
+	a[LINE2_LEN] = '\0';
+	if (HasGlyph(a, LINE2_LEN)) return;
+	onethousandmVmodedetected = (strstr(a, "1000mV Range") != NULL);
+	if (oneVoltmode && onethousandmVmodedetected) memcpy(a, "   1 V Range                 ", LINE2_LEN + 1);
+}
+
+// Draw each run of cells where now[] differs from was[] (every cell if all), and bring was[] up to date
+static uint8_t DrawChanged(const char* now, char* was, int n, const LineFmt* f, uint32_t colour, uint8_t all)
+{
+	uint8_t drew = 0;
+	for (int i = 0; i < n; ) {
+		if (!all && now[i] == was[i]) { i++; continue; }
+		int end = i + 1;
+		while (end < n && (all || now[end] != was[end])) end++;
+		SetTextColors(colour, 0x000000);
+		DrawCells(now, i, end, f);
+		memcpy(was + i, now + i, end - i);
+		render_runs++;
+		render_cells += end - i;
+		drew = 1;
+		i = end;
+	}
+	return drew;
+}
+
+#if EDGE_WIPE
+static void EdgeWipe(void)       // Ian's right-edge wipe: memory Y 952..959 to black
+{
+	for (uint16_t y = 952; y < LCD_YSIZE_TFT; y++) DrawLine(0, y, LCD_XSIZE_TFT - 1, y, 0x00, 0x00, 0x00);
+}
+#endif
+
+uint8_t Render_Update(uint8_t all)
+{
+	char m[LINE1_LEN + 1], a[LINE2_LEN + 1];
+	uint8_t drew = 0;
+
+	render_calls++;
+	BuildAux(a);                                     // first: it sets onethousandmVmodedetected, which BuildMain() uses
+	if (BuildMain(m) && CheckDisplayStatus()) all = 1;   // back on after DISPLAY OFF (glyphs reloaded): draw everything
+	if (!shown.valid) all = 1;
+#if EDGE_WIPE
+	if (all) EdgeWipe();
+#endif
+	drew |= DrawChanged(m, shown.main, LINE1_LEN, &LineFmtMain, MainColourFore, all || shown.mainCol != MainColourFore);
+	drew |= DrawChanged(a, shown.aux, LINE2_LEN, &LineFmtAux, AuxColourFore, all || shown.auxCol != AuxColourFore);
 	for (int i = 0; i < 18; i++) {
-		if (Annunc[i + 1] == 1) {  // Turn the annunciator ON
-			SetTextColors((i == 8) ? 0xFF0000 : AnnunColourFore, 0x000000); // Foreground: the annunciator colour (ERROR in red), Background: Black
-			ConfigureFontAndPosition(
-				0b00,    // Internal CGROM
-				0b01,    // 24-dot font size (12 px wide, x2 tall = 12x48)
-				0b00,    // ISO 8859-1
-				0,       // Full alignment enabled
-				0,       // Chroma keying disabled
-				1,       // Rotate 90 degrees counterclockwise
-				0b00,    // Width X0
-				0b01,    // Height X0
-				5,       // Line spacing
-				0,       // Character spacing
-				Xpos_ANNUNC,  // Cursor X (fixed)
-				AnnuncYCoords[i] // Cursor Y (from array)
-			);
-			DrawText(AnnuncNames[i]); // Print the corresponding name
-		}
-		else {  // Turn the annunciator OFF
-			SetTextColors(0x000000, 0x000000); // Foreground: Black, Background: Black
-			ConfigureFontAndPosition(
-				0b00,    // Internal CGROM
-				0b01,    // 24-dot font size (12 px wide, x2 tall = 12x48)
-				0b00,    // ISO 8859-1
-				0,       // Full alignment enabled
-				0,       // Chroma keying disabled
-				1,       // Rotate 90 degrees counterclockwise
-				0b00,    // Width X0
-				0b01,    // Height X0
-				5,       // Line spacing
-				0,       // Character spacing
-				Xpos_ANNUNC,  // Cursor X (fixed)
-				AnnuncYCoords[i] // Cursor Y (from array)
-			);
-			DrawText(AnnuncNames[i]); // Clear the text by drawing in black
+		_Bool on = Annunc[i + 1];
+		if (all || on != shown.ann[i] || (on && shown.annCol != AnnunColourFore)) {
+			DrawAnnunciator(i, on);
+			shown.ann[i] = on;
+			render_ann++;
+			drew = 1;
 		}
 	}
-
+	shown.mainCol = MainColourFore;
+	shown.auxCol = AuxColourFore;
+	shown.annCol = AnnunColourFore;
+	shown.valid = 1;
+	if (all) render_full++;
+	if (drew) render_draws++;
+	return drew;
 }
+
+#if RENDER_VERIFY
+//******************************************************************************
+// Redraw check (bench, -DRENDER_VERIFY=1): the screen the engine leaves must match, pixel for pixel, the screen Ian's full
+// redraw (DisplayMain/Aux/Annunciators) leaves. Display memory is read back over SPI and hashed per band, memory X 128..351:
+// annunciators 128..183, main 184..287, aux 288..351. Also checks that the right-edge rows (Y 952..959) hold nothing lit
+// outside the cells text reaches there, and that ClearScreen() leaves the whole page black. Results are read over SWD.
+volatile uint32_t rv_checks, rv_mismatch, rv_mismatch_bands, rv_hash[2][3], rv_ms;
+volatile uint32_t rv_self_checks, rv_self_mismatch, rv_self_cells;
+volatile uint32_t rv_edge_checks, rv_edge_stray, rv_edge_first;
+volatile uint32_t rv_clear_dirty = 0xFFFFFFFF, rv_clear_ms;
+volatile char rv_bad_main[LINE1_LEN + 1], rv_bad_aux[LINE2_LEN + 1];   // G[] at the first mismatch
+
+#define RV_X0 Xpos_ANNUNC          // 128: top of the annunciator row
+#define RV_X1 (Xpos_AUX + 64)      // 352: below the aux row
+static uint8_t rv_row[LCD_XSIZE_TFT * 2];
+
+static void BandHashes(volatile uint32_t* h)
+{
+	h[0] = h[1] = h[2] = 2166136261u;                // FNV-1a
+	for (uint16_t y = 0; y < LCD_YSIZE_TFT; y++) {
+		LT_ReadPixels(RV_X0, y, RV_X1 - RV_X0, rv_row);
+		for (int i = 0; i < (RV_X1 - RV_X0) * 2; i++) {
+			int x = RV_X0 + i / 2, b = (x < Xpos_MAIN) ? 0 : (x < Xpos_AUX) ? 1 : 2;
+			h[b] = (h[b] ^ rv_row[i]) * 16777619u;
+		}
+	}
+	LT_ReadDone();
+}
+
+static void EdgeCheck(void)
+{
+	for (uint16_t y = 952; y < LCD_YSIZE_TFT; y++) {
+		LT_ReadPixels(0, y, LCD_XSIZE_TFT, rv_row);
+		for (uint16_t x = 0; x < LCD_XSIZE_TFT; x++) {
+			if (!(rv_row[2 * x] | rv_row[2 * x + 1])) continue;
+			if (y == 952 && x >= Xpos_ANNUNC && x < Xpos_ANNUNC + 48) continue;   // SRQ's cell ends at 952
+			if (y <= 955 && x >= Xpos_AUX && x < Xpos_AUX + 64) continue;         // the last aux cell is 924..955
+			if (!rv_edge_stray) rv_edge_first = ((uint32_t)y << 16) | x;
+			rv_edge_stray++;
+		}
+	}
+	LT_ReadDone();
+	rv_edge_checks++;
+}
+
+// Hash the screen, redraw everything the old way over it, hash again. Returns the bands that differed.
+uint32_t Render_Verify(void)
+{
+	uint32_t t0 = HAL_GetTick(), bands = 0;
+	BandHashes(rv_hash[0]);
+	DisplayMain();
+	DisplayAux();
+	DisplayAnnunciators();
+	BandHashes(rv_hash[1]);
+	for (int b = 0; b < 3; b++) if (rv_hash[0][b] != rv_hash[1][b]) bands |= 1u << b;
+	if (bands && !rv_mismatch_bands) {
+		for (int i = 0; i < LINE1_LEN; i++) rv_bad_main[i] = G[1 + i];
+		for (int i = 0; i < LINE2_LEN; i++) rv_bad_aux[i] = G[LINE1_LEN + 1 + i];
+	}
+	rv_mismatch_bands |= bands;
+	EdgeCheck();
+	rv_ms = HAL_GetTick() - t0;
+	return bands;
+}
+
+void Render_ClearCheck(void)      // after ClearScreen(): count lit pixels anywhere in the page
+{
+	uint32_t t0 = HAL_GetTick(), n = 0;
+	for (uint16_t y = 0; y < LCD_YSIZE_TFT; y++) {
+		LT_ReadPixels(0, y, LCD_XSIZE_TFT, rv_row);
+		for (uint16_t x = 0; x < LCD_XSIZE_TFT; x++) if (rv_row[2 * x] | rv_row[2 * x + 1]) n++;
+	}
+	LT_ReadDone();
+	rv_clear_dirty = n;
+	rv_clear_ms = HAL_GetTick() - t0;
+}
+
+// Synthetic screens before the live loop: random changes to G[] and Annunc[] (text, ohm and sigma placeholders, the
+// micro sign, whole lines, annunciators), each drawn by the engine and then checked against the full redraw.
+static uint32_t rv_rand = 0x2545F491u;
+static uint32_t RvRand(void) { rv_rand ^= rv_rand << 13; rv_rand ^= rv_rand >> 17; rv_rand ^= rv_rand << 5; return rv_rand; }
+
+static char RvChar(void)
+{
+	static const char set[] = "0123456789.+-E VmkMDCARngeOHMSTAUZ" "$$\x7F\x7F\xB5";
+	return set[RvRand() % (sizeof(set) - 1)];
+}
+
+void Render_SelfTest(uint16_t steps)
+{
+	uint32_t cells0 = render_cells;
+	for (int i = 1; i <= 47; i++) G[i] = ' ';
+	for (uint16_t s = 0; s < steps; s++) {
+		uint32_t r = RvRand();
+		switch (r % 6) {
+		case 0:                                                    // a whole new main line
+			for (int i = 1; i <= LINE1_LEN; i++) G[i] = RvChar();
+			break;
+		case 1:                                                    // a whole new aux line
+			for (int i = LINE1_LEN + 1; i <= 47; i++) G[i] = RvChar();
+			break;
+		case 2:                                                    // annunciators
+			for (int k = 0; k < 1 + (int)((r >> 8) % 4); k++) { int a = 1 + RvRand() % 18; Annunc[a] = !Annunc[a]; }
+			break;
+		default:                                                   // a few cells anywhere, like a changing reading
+			for (int k = 0; k < 1 + (int)((r >> 8) % 4); k++) G[1 + RvRand() % 47] = RvChar();
+			break;
+		}
+		Render_Update(0);
+		rv_self_checks++;
+		if (Render_Verify()) rv_self_mismatch++;
+	}
+	rv_self_cells = render_cells - cells0;
+	for (int i = 1; i <= 47; i++) G[i] = ' ';
+	for (int i = 1; i <= 18; i++) Annunc[i] = 0;
+	Render_Update(0);
+}
+#endif
 
 //******************************************************************************
 

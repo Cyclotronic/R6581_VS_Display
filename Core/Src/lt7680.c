@@ -410,6 +410,16 @@ void SendAllToLT7680_LT_2() {
 //******************************************************************************
 // ROUTINES
 
+volatile uint16_t lt_draw_timeouts = 0;
+
+// Wait for the drawing engine: bit 7 of its control register (67h line, 76h rectangle) reads 1 while it draws
+static void LT_WaitDraw(uint8_t reg) {
+    uint32_t n = 0;
+    WriteRegister(reg);
+    while ((ReadData() & 0x80) && ++n < LT_DRAW_POLLS) { }
+    if (n >= LT_DRAW_POLLS && lt_draw_timeouts < 0xFFFF) lt_draw_timeouts++;
+}
+
 // Draw line on LCD, start point, end point, and RGB colour
 // Width is 1-pixel (not polyline)
 // Origin is top left on R6581T orientaton
@@ -458,12 +468,7 @@ void DrawLine(uint16_t startX, uint16_t startY, uint16_t endX, uint16_t endY, ui
     WriteRegister(0x67); // Draw Line/Triangle Control Register
     WriteData(0x80 | 0x00); // Start drawing (bit 7 = 1) and select "Draw Line" (bits 4-1 = 0000)
 
-    // Optionally, wait for the drawing to complete (polling)
-    //uint8_t drawlineFinished;
-    //do {
-    //    WriteRegister(0x67);                // Select the draw control register
-    //    drawlineFinished = ReadData();      // Read the draw status
-    //} while (drawlineFinished & 0x80);      // Bit 7 indicates whether drawing is in progress
+    LT_WaitDraw(0x67);      // so the next call can't reprogram the engine mid-line
 }
 
 
@@ -640,6 +645,23 @@ void ConfigureFontAndPosition(uint8_t fontSource, uint8_t characterHeight, uint8
 
 
 
+#if !LT_CLEAR_TEXT
+// The whole page (memory 400 x 960, overscan included) to black: one filled rectangle from the drawing engine.
+// Leaves the text colours black, as the text version did.
+void ClearScreen() {
+    SetTextColors(0x000000, 0x000000);      // the fill uses the foreground colour
+    WriteRegister(0x68); WriteData(0);      // start X, Y = 0, 0
+    WriteRegister(0x69); WriteData(0);
+    WriteRegister(0x6A); WriteData(0);
+    WriteRegister(0x6B); WriteData(0);
+    WriteRegister(0x6C); WriteData((LCD_XSIZE_TFT - 1) & 0xFF);          // end X
+    WriteRegister(0x6D); WriteData(((LCD_XSIZE_TFT - 1) >> 8) & 0x1F);
+    WriteRegister(0x6E); WriteData((LCD_YSIZE_TFT - 1) & 0xFF);          // end Y
+    WriteRegister(0x6F); WriteData(((LCD_YSIZE_TFT - 1) >> 8) & 0x1F);
+    WriteRegister(0x76); WriteData(0xE0);   // start (bit 7), filled (bit 6), rectangle (bits 5-4 = 10)
+    LT_WaitDraw(0x76);
+}
+#else
 void ClearScreen() {
     uint16_t charWidth = 8;      // Character width in pixels
     uint16_t charHeight = 16;    // Character height in pixels
@@ -682,6 +704,7 @@ void ClearScreen() {
     }
 
 }
+#endif
 
 
 // Draw Text Chunks - Not used (DrawText with FIFO supersedes)
@@ -2155,3 +2178,29 @@ void LT_CacheCheck(void) {
     lt_reg = keep;
 }
 #endif
+
+//**************************************************************************************************
+// Display memory read-back (Stage 6 bench checks, display.c RENDER_VERIFY). Reads px pixels (16 bpp, 2 bytes each) of the
+// visible page from memory X = x0, Y = y through the memory data port. Call LT_ReadDone() after the last row.
+void LT_ReadPixels(uint16_t x0, uint16_t y, uint16_t px, uint8_t* buf) {
+    uint16_t i, t;
+    WaitForLT7680Ready();
+    Graphics_Mode();
+    WriteRegister(0x5F); WriteData(x0 & 0xFF);          // memory read position
+    WriteRegister(0x60); WriteData((x0 >> 8) & 0x1F);
+    WriteRegister(0x61); WriteData(y & 0xFF);
+    WriteRegister(0x62); WriteData((y >> 8) & 0x1F);
+    WriteRegister(0x04);
+    (void)ReadData();                                   // the first read after setting the position is a dummy
+    for (i = 0; i < px * 2u; i++) {
+        for (t = 0; (ReadStatus() & 0x10) && t < 1000; t++) { }   // status bit 4: read FIFO empty
+        buf[i] = ReadData();
+    }
+}
+
+void LT_ReadDone(void) {                                // back to text mode, as LoadCustomGlyphs_LT() leaves it
+    ResetGraphicWritePosition_LT();
+    SetGraphicRWYCoordinate_LT();
+    Text_Mode();
+    WaitForLT7680Ready();
+}

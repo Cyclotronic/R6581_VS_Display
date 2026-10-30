@@ -59,6 +59,30 @@ void DisplayBootScreen(uint8_t bootNumber, uint8_t of);   // boot-time diagnosti
 void DisplayAux(void);
 void DisplayAnnunciators(void);
 
+// ---- Redraw engine (Stage 6 of docs/REWORK-PLAN.md) --------------------------------------------------------------------
+// The live loop draws only what changed, as soon as a stable frame is decoded (Render_Update).
+#ifndef FULL_REDRAW
+#define FULL_REDRAW 0           // 1 = Ian's redraw of everything every 35 ms tick, with the 6 ms wait and the right-edge wipe (A/B)
+#endif
+#ifndef FULL_REDRAW_MS
+#define FULL_REDRAW_MS 10000    // the engine still repaints everything this often (0 = never)
+#endif
+#ifndef EDGE_WIPE
+#define EDGE_WIPE 0             // 1 = blank memory Y 952..959 before each full repaint, as Ian did on every tick
+#endif
+#ifndef RENDER_VERIFY
+#define RENDER_VERIFY 0         // bench: read the screen back and check it against Ian's full redraw (display.c)
+#endif
+#define RENDER_VERIFY_MS 5000   // how often the live loop runs the check
+#define RENDER_SELFTEST_STEPS 60   // synthetic screens checked before the live loop
+uint8_t Render_Update(uint8_t all);   // draw what changed (everything if all); returns 1 if anything was drawn
+#if RENDER_VERIFY
+uint32_t Render_Verify(void);
+extern volatile uint32_t rv_checks, rv_mismatch;
+void Render_ClearCheck(void);
+void Render_SelfTest(uint16_t steps);
+#endif
+
 // Glyph self-test: set GLYPH_SELFTEST to 1 (e.g. -DGLYPH_SELFTEST=1) to run it once at boot before normal operation.
 #ifndef GLYPH_SELFTEST
 #define GLYPH_SELFTEST 0

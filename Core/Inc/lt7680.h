@@ -210,6 +210,13 @@ extern uint32_t lt_pclk_khz;
 #define LT_BUS_TEST				0			// bench only: 100,000 register read-backs and a burst-write test after init
 #endif
 void LT_BusForget(void);					// forget the cached address and registers (after a reset)
+#ifndef LT_CLEAR_TEXT
+#define LT_CLEAR_TEXT			0			// 1 = Ian's ClearScreen(): about 3,000 space characters instead of one filled rectangle
+#endif
+#define LT_DRAW_POLLS			20000u		// DrawLine()/ClearScreen() give up waiting for the drawing engine after this many reads
+extern volatile uint16_t lt_draw_timeouts;
+void LT_ReadPixels(uint16_t x0, uint16_t y, uint16_t px, uint8_t* buf);   // display memory read-back (bench checks)
+void LT_ReadDone(void);
 void LT_BusTest(void);
 void LT_CacheCheck(void);
 #define LT_FAULT_RESET			0x01		// status bit 1 never cleared after reset
@@ -265,6 +272,7 @@ void ConfigureFontAndPosition(uint8_t fontSource,
 void DrawText(const char* text);
 
 void ClearScreen(void);
+void DrawLine(uint16_t startX, uint16_t startY, uint16_t endX, uint16_t endY, uint16_t colorRED, uint16_t colorGREEN, uint16_t colorBLUE);
 
 void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage);
 

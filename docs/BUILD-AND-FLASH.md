@@ -179,6 +179,11 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | `LT_REG_CACHE=0` | 1 | Turn off the register cache (skipping writes to 03h, CCh, CDh, D0h-D7h that don't change them) |
 | `LT_SPI_STATS=1` | 0 | Count CS frames sent and skipped (`lt_frames`, `lt_frames_saved`) |
 | `LT_BUS_TEST=1` | 0 | Bench: after init, 100,000 register read-backs and a single-byte vs burst SDRAM write test; results in `lt_bus_*`, `lt_single_errs`, `lt_burst_errs` |
+| `FULL_REDRAW=1` | 0 | Ian's live loop: everything redrawn every 35 ms tick, then the right-edge wipe and a 6 ms wait. The default (Stage 6) draws only the cells and annunciators that changed, as soon as a stable frame is decoded; for A/B comparison. See Stage 6 in [REWORK-PLAN.md](REWORK-PLAN.md) |
+| `FULL_REDRAW_MS=n` | 10000 | How often the Stage 6 loop still repaints everything (0 = never) |
+| `EDGE_WIPE=1` | 0 | Blank memory rows 952 to 959 (the right edge) before each full repaint, as Ian's loop did every tick |
+| `LT_CLEAR_TEXT=1` | 0 | Ian's `ClearScreen()` (about 3,000 space characters) instead of one filled rectangle from the drawing engine |
+| `RENDER_VERIFY=1` | 0 | Bench: reads display memory back over SPI. Checks that `ClearScreen()` leaves the page black, runs 60 random screens through the redraw engine and compares each with Ian's full redraw, and repeats the comparison and a right-edge check every 5 s; results in `rv_*` |
 | `LT_REGDUMP=1` | 0 | Reads the LT7680 PLL, panel and SDRAM registers (both SDRAM register banks) into `lt_regdump[]` after init, and again on request; decode with `tools/regdump.py`. Stage 0 of [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `OPT=0/2/s` (environment, not a -D) | 0 | Optimisation level |
 

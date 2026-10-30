@@ -170,8 +170,9 @@ volatile uint32_t cap_short = 0;        // EXTI came before the DMA had the whol
 volatile uint32_t cap_unstable = 0;     // frames that differed from the one before (a change, or a bad frame); not decoded
 volatile uint32_t cap_decodes = 0;      // frames decoded
 volatile uint32_t cap_unmatched = 0;    // decodes with at least one character not in the font table ('?')
-volatile uint32_t draws = 0;            // timed redraws (35 ms)
+volatile uint32_t draws = 0;            // redraws that drew something (FULL_REDRAW=1: every 35 ms tick)
 volatile uint32_t draw_unmatched = 0;   // redraws with a '?' in G[]: what would reach the screen
+volatile uint32_t cap_frame_cyc = 0;    // TIMING_PROBE: DWT cycle count when cap_frame was last filled
 volatile uint32_t main_loops = 0;       // passes of the main loop (a measure of idle CPU time)
 static uint8_t cap_armed = 0;           // a DMA has been started, so the next EXTI ends a real frame
 
@@ -180,6 +181,9 @@ void Capture_FrameEnd(void)
 	if (cap_armed && __HAL_DMA_GET_COUNTER(hspi2.hdmarx) == 0) {
 		memcpy((void*)cap_frame, (const void*)rx_buffer, FRAME_BYTES);
 		cap_seq++;
+#if TIMING_PROBE
+		cap_frame_cyc = DWT->CYCCNT;
+#endif
 	}
 	else if (cap_armed) {
 		cap_short++;
@@ -198,6 +202,21 @@ volatile uint32_t tp_period_last, tp_period_min = 0xFFFFFFFF, tp_period_max;  //
 volatile uint32_t tp_blocks;                                             // number of timed blocks run
 volatile uint32_t tp_main_loops;                                         // passes of the main while(1)
 static uint32_t tp_prev_entry;
+// Change-to-screen latency (Stage 6): from the end of the first frame that showed a change to the end of the draw.
+// The stable-frame rule alone accounts for one frame (~9 ms). Microseconds.
+volatile uint32_t tp_lat_last, tp_lat_min = 0xFFFFFFFF, tp_lat_max, tp_lat_sum, tp_lat_n;
+static uint32_t tp_change_cyc, tp_lat_from;
+static uint8_t tp_lat_pending;
+static void TP_Latency(uint32_t end)
+{
+	if (!tp_lat_pending) return;
+	tp_lat_pending = 0;
+	tp_lat_last = (end - tp_lat_from) / (SystemCoreClock / 1000000u);
+	if (tp_lat_last < tp_lat_min) tp_lat_min = tp_lat_last;
+	if (tp_lat_last > tp_lat_max) tp_lat_max = tp_lat_last;
+	tp_lat_sum += tp_lat_last;
+	tp_lat_n++;
+}
 #endif
 
 /* Private function prototypes -----------------------------------------------*/
@@ -497,30 +516,41 @@ void Main_Aux_R6581(void) {
 }
 
 #if !CAPTURE_LEGACY
-// Decode the newest captured frame once it has been seen twice in a row (see Capture_FrameEnd)
-static void Capture_Poll(void)
+// Decode the newest captured frame once it has been seen twice in a row (see Capture_FrameEnd). Returns 1 if it decoded one.
+static uint8_t Capture_Poll(void)
 {
 	static uint8_t now[FRAME_BYTES], prev[FRAME_BYTES], shown[FRAME_BYTES];
 	static uint32_t seen = 0;
 	static uint8_t have_prev = 0, have_shown = 0;
 
-	if (cap_seq == seen) return;
+	if (cap_seq == seen) return 0;
 	__disable_irq();
 	memcpy(now, (const void*)cap_frame, FRAME_BYTES);
 	seen = cap_seq;
+#if TIMING_PROBE
+	uint32_t at = cap_frame_cyc;
+#endif
 	__enable_irq();
 
 	if (!have_prev || memcmp(now, prev, FRAME_BYTES) != 0) {   // new or changed: wait for the same bytes again
 		if (have_prev) cap_unstable++;
 		memcpy(prev, now, FRAME_BYTES);
 		have_prev = 1;
-		return;
+#if TIMING_PROBE
+		tp_change_cyc = at;
+#endif
+		return 0;
 	}
-	if (have_shown && memcmp(now, shown, FRAME_BYTES) == 0) return;   // already decoded
+	if (have_shown && memcmp(now, shown, FRAME_BYTES) == 0) return 0;   // already decoded
 	memcpy(shown, now, FRAME_BYTES);
 	have_shown = 1;
 	Packets_to_chars(now);
 	Main_Aux_R6581();
+#if TIMING_PROBE
+	tp_lat_from = tp_change_cyc;
+	tp_lat_pending = 1;
+#endif
+	return 1;
 }
 #endif
 
@@ -718,6 +748,9 @@ int main(void) {
 		}
 	}
 	ClearScreen(); // Again.....
+#if RENDER_VERIFY
+	Render_ClearCheck();			// the whole page must now read black
+#endif
 
 	LoadCustomGlyphs_LT();			// ohm + sigma glyphs, loaded once (and again after DISPLAY OFF)
 #if SDRAM_SOAK
@@ -727,6 +760,9 @@ int main(void) {
 #if GLYPH_SELFTEST
 	GlyphSelfTest();	// ~90 s of test pages, then normal operation
 #endif
+#if RENDER_VERIFY && !FULL_REDRAW
+	Render_SelfTest(RENDER_SELFTEST_STEPS);	// synthetic screens, each checked against the full redraw
+#endif
 	
 #if TIMING_PROBE
 	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -735,6 +771,10 @@ int main(void) {
 #endif
 	Init_Completed_flag = 1; // Now is a safe time to enable the EXTI interrupt handler
 	boot_ready_ms = HAL_GetTick();
+#if !FULL_REDRAW
+	uint8_t render_tick = 0;			// the 35 ms tick asks for a render (1 V mode and the periodic repaint need no new frame)
+	uint32_t full_redraw_ms = HAL_GetTick();
+#endif
 
 	while (1) {
 
@@ -758,9 +798,11 @@ int main(void) {
 		DMA1_Channel3->CCR |= DMA_CCR_EN;				// Re-enable the TFT DMA channel
 		SPI1->CR1 |= SPI_CR1_SPE;						// Re-enable the TFT SPI peripheral by setting its SPE bit
 		NVIC_EnableIRQ(SPI1_IRQn);						// Re-enable the TFT SPI NVIC interrupts
+		uint8_t fresh = 0;
 #else
-		Capture_Poll();					// decode a new, stable VFD frame if there is one
+		uint8_t fresh = Capture_Poll();	// decode a new, stable VFD frame if there is one
 #endif
+		(void)fresh;
 
 		task_ready = 1; // Mark tasks as complete so the timer driven code is allowed to run again
 
@@ -788,6 +830,7 @@ int main(void) {
 			
 			if (timingModsOnBoot == false) {
 
+#if FULL_REDRAW
 				draws++;
 				if (memchr(&G[1], '?', CHAR_COUNT)) draw_unmatched++;
 #if CAPTURE_LEGACY
@@ -833,6 +876,7 @@ int main(void) {
 				DrawLine(0, 952, 399, 952, 0x00, 0x00, 0x00);
 #if TIMING_PROBE
 				tp_draw_last = DWT->CYCCNT - tp_t0; if (tp_draw_last < tp_draw_min) tp_draw_min = tp_draw_last; if (tp_draw_last > tp_draw_max) tp_draw_max = tp_draw_last;
+				TP_Latency(tp_t0 + tp_draw_last);
 #endif
 
 				// Test only - 400pixel based test lines for viewing the centre line and the left, middle and far right positions.
@@ -844,6 +888,10 @@ int main(void) {
 
 				//HAL_Delay(6); // Allow the LT7680 sufficient processing time
 				Delay_NonBlocking(6);  // Wait 6ms in a non-blocking way
+#else
+				DisplaySplash();		// only with SPLASH_IN_LOOP
+				render_tick = 1;		// drawing happens below, after the button is read
+#endif
 
 				// Read pins A11/A12 - Front panel DCV switch momentary - Enable 1VDC mode
 				GPIO_PinState pinA11 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
@@ -869,7 +917,7 @@ int main(void) {
 				// Wait until SPI1 finishes any ongoing transactions
 				while (SPI1->SR & SPI_SR_BSY);
 
-#if TIMING_PROBE
+#if TIMING_PROBE && FULL_REDRAW
 				tp_total_last = DWT->CYCCNT - tp_t0; if (tp_total_last > tp_total_max) tp_total_max = tp_total_last; tp_blocks++;
 #endif
 #if CAPTURE_LEGACY
@@ -1133,6 +1181,49 @@ int main(void) {
 			
 
 		}
+#if !FULL_REDRAW
+		//*******************************************************************************************
+		// Redraw (Stage 6): draw what changed as soon as a new frame is decoded. The 35 ms tick still reads the DCV
+		// button (1 V mode changes the text without a new frame) and repaints everything every FULL_REDRAW_MS.
+		if (timingModsOnBoot == false && (fresh || render_tick)) {
+			uint8_t all = 0;
+			render_tick = 0;
+#if FULL_REDRAW_MS
+			if (HAL_GetTick() - full_redraw_ms >= FULL_REDRAW_MS) { all = 1; full_redraw_ms = HAL_GetTick(); }
+#endif
+#if TIMING_PROBE
+			uint32_t tp_t0 = DWT->CYCCNT;
+#endif
+			uint8_t drew = Render_Update(all);
+#if TIMING_PROBE
+			uint32_t tp_t1 = DWT->CYCCNT;
+			tp_total_last = tp_t1 - tp_t0; if (tp_total_last > tp_total_max) tp_total_max = tp_total_last;
+			if (drew) {
+				tp_draw_last = tp_total_last; if (tp_draw_last < tp_draw_min) tp_draw_min = tp_draw_last; if (tp_draw_last > tp_draw_max) tp_draw_max = tp_draw_last;
+				if (tp_blocks) { tp_period_last = tp_t0 - tp_prev_entry; if (tp_period_last < tp_period_min) tp_period_min = tp_period_last; if (tp_period_last > tp_period_max) tp_period_max = tp_period_last; }
+				tp_prev_entry = tp_t0;
+				tp_blocks++;
+				TP_Latency(tp_t1);
+			}
+			else tp_lat_pending = 0;     // the decoded change did not alter the text
+#endif
+			if (drew) {
+				draws++;
+				if (memchr(&G[1], '?', CHAR_COUNT)) draw_unmatched++;
+			}
+		}
+#if RENDER_VERIFY
+		{
+			static uint32_t last_verify = 0;
+			if (timingModsOnBoot == false && HAL_GetTick() - last_verify >= RENDER_VERIFY_MS) {
+				rv_checks++;
+				if (Render_Verify()) rv_mismatch++;
+				last_verify = HAL_GetTick();
+			}
+		}
+#endif
+#endif
+
 	}
 
 }
