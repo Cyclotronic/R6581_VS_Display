@@ -13,6 +13,7 @@ not a problem; every change is explained here, with how to undo it.
 | [SLOW-MO-ANALYSIS.md](SLOW-MO-ANALYSIS.md) | The 240 fps slow-motion study of display updates: method, numbers, and why it showed no tearing and no benefit from page flip. |
 | [LAYOUT.md](LAYOUT.md) | Panel geometry, the three display rows, the layout table, the taller-middle-line experiment (rejected: lens interference). |
 | [ONE-VOLT-MODE.md](ONE-VOLT-MODE.md) | Ian's 1 V display mode (DCV press on the 1000 mV range shows volts): what it does, why it is off by default here, how to turn it back on. |
+| [REWORK-PLAN.md](REWORK-PLAN.md) | **Plan, not yet implemented:** audit findings (SDRAM refresh disabled by a register-bank mix-up, out-of-range PLL, torn capture reads, full redraw every tick), what to keep, and a staged rework with checks for each stage. |
 | [BENCH-TOOLS.md](BENCH-TOOLS.md) | The scripts in [`tools/`](tools/): build script, SWD reader, menu-walk logger, timing probe reader, slow-motion video analysis. |
 
 The newest build (`-O2`, new boot screen) is `../Prebuilt/test-2026-10-17-O2-bootscreen/`. Ready-to-flash builds are in [`../Prebuilt/`](../Prebuilt/); each folder has its own README, checksums and flashing commands.
