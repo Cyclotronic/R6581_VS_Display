@@ -36,3 +36,26 @@ drawn by `tools/layout_diagram.py`.
 
 The boot screen has its own layout, centred and kept inside the same vertical band as the live rows (X 128 to 352), because
 nothing else is on screen during boot; see [BOOT-AND-SPLASH.md](BOOT-AND-SPLASH.md).
+
+## Timing-adjust page
+
+The page shown when DCV is held at power-up stays inside the band the meter's window shows: X 128 to about 345 on the
+bench (the live rows use 128 to 352). Ian's page started at X 140 and ran to about 324, and the hardware identity rows
+added after the rework would have fallen below the window. Every row now uses the largest built-in font, 32 px (16 px
+characters plus spacing), which allows 47 characters across the 951 px. Rows (X = top, `TA_X_*` in
+`Core/Src/settings.c`), 36 px apart:
+
+| X | Row |
+|---|---|
+| 128 | `TFT Timing: DCV select/save, pwr cycle to apply` (green) |
+| 164 | column names: VBPD VFPD VSPW HBPD HFPD HSPW REFR COG |
+| 200 | `Current:` the set in use at power-up (yellow) |
+| 236 | `New/Saved:` the set just selected and saved (green; after the first press) |
+| 272 | `MCU  CPUID 411FC231 ID 00000000 64KB CYCCNT OK` (cyan) |
+| 308 | `Panel  ST7701S FFFFFF  Pwr 9C  LT7680 OK, 1 try` (cyan), ending at 340 |
+
+The three timing rows are 48 and 49 characters with the `New/Saved:` label, so they use 3 px character spacing
+instead of 4 to fit the width. The title line replaces Ian's two instruction lines, "Hit DCV to cycle round new TFT LCD
+settings" and "Power cycle may be necessary to achieve full effect". Each DCV press selects and saves the next set; a
+power cycle applies it fully. The identity rows are described in
+[BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md#hardware-identity-on-the-timing-adjust-page).

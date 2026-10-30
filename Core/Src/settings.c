@@ -240,15 +240,27 @@ void Settings_Load(void) {
 
 
 //**************************************************************************************************
-// Two lines on the timing-adjust page identifying the hardware, for diagnosing boards that differ (docs/BLUE-PILL-CHIPS.md):
+// Timing-adjust page rows (X = top of the row). The meter's window shows the band the live display uses, X 128 to 352
+// (docs/LAYOUT.md), so everything on this page stays inside it.
+// Largest font that fits: six 32 px rows (20 px a character, so at most 47 characters across the 951 px), 36 px apart,
+// ending at 340. On the bench the window shows down to about X 345.
+#define TA_X_TITLE		128		// title and what to do
+#define TA_X_HEADER		164		// column names
+#define TA_X_CURRENT	200		// the set in use at power-up
+#define TA_X_NEW		236		// the set just saved (after the first press)
+#define TA_X_MCU		272		// MCU identity
+#define TA_X_PANEL		308		// panel and LT7680
+
+//**************************************************************************************************
+// Two rows on the timing-adjust page identifying the hardware, for diagnosing boards that differ (docs/BLUE-PILL-CHIPS.md):
 // the Blue Pill's core CPUID (0x411FC231 on ST's STM32F103), its device ID register (reads 0 on ST's STM32F103 without a
 // debugger attached, an ST erratum), flash size, and whether the DWT cycle counter that DelayMicroseconds() relies on runs;
 // then the panel's ST7701S ID bytes and power-mode byte (read at boot) and how the LT7680 set-up went. The LT7680 has no ID register.
-static void DrawIdLine(uint16_t x, const char* s) {
-	SetTextColors(0x00FFFF, 0x000000); // Foreground: cyan, Background: Black
+static void DrawIdLine(uint16_t x, uint32_t colour, const char* s) {
+	SetTextColors(colour, 0x000000);
 	ConfigureFontAndPosition(
 		0b00,    // Internal CGROM
-		0b00,    // Font size
+		0b10,    // Font size
 		0b00,    // ISO 8859-1
 		0,       // Full alignment enabled
 		0,       // Chroma keying disabled
@@ -268,19 +280,19 @@ static void DrawChipId(void) {
 	uint32_t c0 = DWT->CYCCNT;
 	uint8_t cyc_ok = !(DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) && (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) && DWT->CYCCNT != c0;
 
-	snprintf(line, sizeof(line), "MCU    CPUID %08lX  ID %08lX  Flash %uKB  Cycle counter %s",
+	snprintf(line, sizeof(line), "MCU  CPUID %08lX ID %08lX %uKB CYCCNT %s",
 		(unsigned long)SCB->CPUID, (unsigned long)DBGMCU->IDCODE, *(volatile uint16_t*)FLASHSIZE_BASE,
-		cyc_ok ? "OK" : "MISSING");
-	DrawIdLine(340, line);
+		cyc_ok ? "OK" : "NONE");
+	DrawIdLine(TA_X_MCU, 0x00FFFF, line);
 
 	char panel[24], lt[24];
 	if (lcd_id == 0xFFFFFFFFu) strcpy(panel, "no reply");
-	else snprintf(panel, sizeof(panel), "%06lX  power %02X", (unsigned long)lcd_id, lcd_pwr & 0xFF);
+	else snprintf(panel, sizeof(panel), "%06lX  Pwr %02X", (unsigned long)lcd_id, lcd_pwr & 0xFF);
 	if (lt_fault) snprintf(lt, sizeof(lt), "fault %02X", lt_fault);
 	else strcpy(lt, "OK");
-	snprintf(line, sizeof(line), "Panel  ST7701S ID %s   LT7680 %s, %u %s", panel, lt, lt_init_attempts,
+	snprintf(line, sizeof(line), "Panel  ST7701S %s  LT7680 %s, %u %s", panel, lt, lt_init_attempts,
 		lt_init_attempts == 1 ? "try" : "tries");
-	DrawIdLine(360, line);
+	DrawIdLine(TA_X_PANEL, 0x00FFFF, line);
 }
 
 //**************************************************************************************************
@@ -385,19 +397,20 @@ void TimingAdjust_Poll(void) {
 				0b00,    // Height multiplier
 				1,       // Line spacing
 				4,       // Character spacing
-				140,     // Cursor X
+				TA_X_TITLE,     // Cursor X
 				0      // Cursor Y
 			);
-			char text1[] = "TFT LCD Timing Adjust";
+			char text1[] = "TFT Timing: DCV select/save, pwr cycle to apply";
 			DrawText(text1);
 
 			//HAL_Delay(6);
 			Delay_NonBlocking(6);  // Wait ms in a non-blocking way
 
-			SetTextColors(0xFFFFFF, 0x000000); // Foreground: green, Background: Black
+			SetTextColors(0xFFFFFF, 0x000000); // Foreground: white, Background: Black
+
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
-				0b01,    // Font size
+				0b10,    // Font size
 				0b00,    // ISO 8859-1
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
@@ -405,51 +418,11 @@ void TimingAdjust_Poll(void) {
 				0b00,    // Width multiplier
 				0b00,    // Height multiplier
 				1,       // Line spacing
-				4,       // Character spacing
-				170,     // Cursor X
-				0      // Cursor Y
-			);
-			char text2[] = "Hit DCV to cycle round new TFT LCD settings";
-			DrawText(text2);
-
-			//HAL_Delay(6);
-			Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-			ConfigureFontAndPosition(
-				0b00,    // Internal CGROM
-				0b01,    // Font size
-				0b00,    // ISO 8859-1
-				0,       // Full alignment enabled
-				0,       // Chroma keying disabled
-				1,       // Rotate 90 degrees counterclockwise
-				0b00,    // Width multiplier
-				0b00,    // Height multiplier
-				1,       // Line spacing
-				4,       // Character spacing
-				195,     // Cursor X
-				0      // Cursor Y
-			);
-			char text3[] = "Power cycle may be necessary to achieve full effect";
-			DrawText(text3);
-
-			//HAL_Delay(6);
-			Delay_NonBlocking(6);  // Wait ms in a non-blocking way
-
-			ConfigureFontAndPosition(
-				0b00,    // Internal CGROM
-				0b01,    // Font size
-				0b00,    // ISO 8859-1
-				0,       // Full alignment enabled
-				0,       // Chroma keying disabled
-				1,       // Rotate 90 degrees counterclockwise
-				0b00,    // Width multiplier
-				0b00,    // Height multiplier
-				1,       // Line spacing
-				4,       // Character spacing
-				250,     // Cursor X
+				3,       // Character spacing (3: the 49-character rows fit the 951 px)
+				TA_X_HEADER,     // Cursor X
 				0       // Cursor Y
 			);
-			char text4[] = "        VBPD VFPD VSPW HBPD HFPD HSPW REFR COG";
+			char text4[] = "          VBPD VFPD VSPW HBPD HFPD HSPW REFR COG";
 			DrawText(text4);
 
 			//HAL_Delay(6);
@@ -458,7 +431,7 @@ void TimingAdjust_Poll(void) {
 			SetTextColors(0xFFFF00, 0x000000); // Foreground: Yellow, Background: Black
 			ConfigureFontAndPosition(
 				0b00,    // Internal CGROM
-				0b01,    // Font size
+				0b10,    // Font size
 				0b00,    // ISO 8859-1
 				0,       // Full alignment enabled
 				0,       // Chroma keying disabled
@@ -466,13 +439,13 @@ void TimingAdjust_Poll(void) {
 				0b00,    // Width multiplier
 				0b00,    // Height multiplier
 				1,       // Line spacing
-				4,       // Character spacing
-				275,     // Cursor X
+				3,       // Character spacing (3: the 49-character rows fit the 951 px)
+				TA_X_CURRENT,     // Cursor X
 				0      // Cursor Y
 			);
 			char redefineValuesCurr[128]; // Ensure the buffer is large enough
 			snprintf(redefineValuesCurr, sizeof(redefineValuesCurr),
-				"CURRENT %d   %d   %d    %d   %d   %d   %d   %s",
+				"Current:  %d   %d   %d    %d   %d   %d   %d   %s",
 				boot_LCD_VBPD,
 				boot_LCD_VFPD,
 				boot_LCD_VSPW,
@@ -491,7 +464,7 @@ void TimingAdjust_Poll(void) {
 				SetTextColors(0x00FF00, 0x000000); // Foreground: Yellow, Background: Black
 				ConfigureFontAndPosition(
 					0b00,    // Internal CGROM
-					0b01,    // Font size
+					0b10,    // Font size
 					0b00,    // ISO 8859-1
 					0,       // Full alignment enabled
 					0,       // Chroma keying disabled
@@ -499,13 +472,13 @@ void TimingAdjust_Poll(void) {
 					0b00,    // Width multiplier
 					0b00,    // Height multiplier
 					1,       // Line spacing
-					4,       // Character spacing
-					300,     // Cursor X
+					3,       // Character spacing (3: the 49-character rows fit the 951 px)
+					TA_X_NEW,     // Cursor X
 					0      // Cursor Y
 				);
 				char redefineValues[128]; // Ensure the buffer is large enough
 				snprintf(redefineValues, sizeof(redefineValues),
-					"NEW     %d   %d   %d    %d   %d   %d   %d   %s",
+					"New/Saved:%d   %d   %d    %d   %d   %d   %d   %s",
 					setting_LCD_VBPD,
 					setting_LCD_VFPD,
 					setting_LCD_VSPW,
@@ -519,6 +492,7 @@ void TimingAdjust_Poll(void) {
 			}
 
 			DrawChipId();		// chip identities, below the timing rows
+
 
 			// Delay for button
 			//HAL_Delay(120);

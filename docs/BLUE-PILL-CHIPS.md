@@ -60,22 +60,25 @@ directly.
 
 ## Hardware identity on the timing-adjust page
 
-Hold DCV at power-up to open the timing-adjust page. Below the timing rows, two cyan lines identify the hardware, so a
-board that behaves differently can be described without an ST-Link:
+Hold DCV at power-up to open the timing-adjust page. Its two bottom rows identify the hardware, so a board that behaves
+differently can be described without an ST-Link:
 
 ```
-MCU    CPUID 411FC231  ID 00000000  Flash 64KB  Cycle counter OK
-Panel  ST7701S ID FFFFFF  power 9C   LT7680 OK, 1 try
+MCU  CPUID 411FC231 ID 00000000 64KB CYCCNT OK
+Panel  ST7701S FFFFFF  Pwr 9C  LT7680 OK, 1 try
 ```
+
+The whole page stays inside the band the meter's window shows, in the largest built-in font; see
+[LAYOUT.md](LAYOUT.md#timing-adjust-page).
 
 | Field | Where it comes from | On the bench board |
 |---|---|---|
 | `CPUID` | the Cortex-M3's `SCB->CPUID` | `411FC231` (Arm Cortex-M3 r1p1, as ST's STM32F103) |
 | `ID` | `DBGMCU_IDCODE`. ST's errata say firmware reads it as 0 on an STM32F103 unless a debugger is attached; a clone that shows a value here behaves differently from ST's part | `20036410` with the ST-Link attached; the page shows what it reads without one |
-| `Flash` | the flash-size word at `0x1FFFF7E0` | `64KB` |
-| `Cycle counter` | the DWT cycle counter: present, enabled, and advancing | `OK` |
-| `ST7701S ID` | the panel's RDID1-3 bytes (`DAh`, `DBh`, `DCh`), read once at boot over the panel's SPI | `FFFFFF`: the module maker left them unprogrammed |
-| `power` | the panel's power-mode register (`0Ah`) from the same read. `9C` = booster on, awake, normal mode, display on. It shows the panel answers and is set up | `9C` |
+| `64KB` | the flash size, from the word at `0x1FFFF7E0` | `64KB` |
+| `CYCCNT` | the DWT cycle counter: present, enabled and advancing (`OK`), or `NONE` | `OK` |
+| `ST7701S` | the panel's RDID1-3 bytes (`DAh`, `DBh`, `DCh`), read once at boot over the panel's SPI | `FFFFFF`: the module maker left them unprogrammed |
+| `Pwr` | the panel's power-mode register (`0Ah`) from the same read. `9C` = booster on, awake, normal mode, display on. It shows the panel answers and is set up | `9C` |
 | `LT7680` | how the controller's set-up ended: `OK`, or the fault bits (`01` reset, `02` no reply, `04` PLL, `08` SDRAM), and the number of tries | `OK, 1 try` |
 
 If the panel doesn't answer at all, the field reads `no reply`.
