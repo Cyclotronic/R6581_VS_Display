@@ -1010,11 +1010,23 @@ void Check_SDRAM_Ready_LT() {
     unsigned char status;
     
     // Poll the SDRAM Ready Flag (Bit 0) in Register 0xE4
+#if LT_REGDUMP
+    uint16_t polls = 0;
+#endif
     do {
         WriteRegister(0xE4);
         status = ReadData(); // Read the SDRAM status register
+#if LT_REGDUMP
+        if (polls < 0xFFFF) polls++;
+#endif
     } while ((status & 0x01) == 0);  // Wait until the Ready bit (bit 0) is set
-    
+#if LT_REGDUMP
+    lt_regdump[LTRD_INIT_POLLS_LO] = polls & 0xFF;
+    lt_regdump[LTRD_INIT_POLLS_HI] = polls >> 8;
+    lt_regdump[LTRD_INIT_E4] = status;
+    lt_regdump[LTRD_INIT_STSR] = ReadStatus();
+#endif
+
     // Optional delay to ensure SDRAM is stable after initialization
     HAL_Delay(10);  // 10 ms delay
 
@@ -1529,6 +1541,49 @@ void LoadCustomGlyphs_LT(void) {
     WaitForLT7680Ready();
     cgram_start_cached = 0xFFFFFFFFUL;                 // force the next draw to set the start address
 }
+
+//**************************************************************************************************
+// Register readback for SWD (build with -DLT_REGDUMP=1). Stage 0 of docs/REWORK-PLAN.md.
+// Reads the PLL, panel and SDRAM registers into lt_regdump[] (offsets LTRD_* in lt7680.h); tools/regdump.py decodes it.
+// The SDRAM timing-parameter bank is read by setting REG[E4h] bit 2 for the duration of four reads, the same E4h writes
+// SDRAM_Init_LT() already makes (0x04, then 0x00). Bit 0 (start initialisation) is never written as 1 here.
+#if LT_REGDUMP
+volatile uint8_t lt_regdump[LTRD_SIZE];
+volatile uint8_t lt_regdump_request;     // set to 1 over SWD; the main loop dumps again and clears it
+
+static uint8_t ReadReg_LT(uint8_t reg) {
+    WriteRegister(reg);
+    return ReadData();
+}
+
+void LT_RegDump(void) {
+    static const uint8_t pll[6] = { 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A };
+    uint8_t i, e4;
+
+    lt_regdump[LTRD_STSR] = ReadStatus();
+    lt_regdump[LTRD_R00] = ReadReg_LT(0x00);
+    lt_regdump[LTRD_R01] = ReadReg_LT(0x01);
+    lt_regdump[LTRD_R03] = ReadReg_LT(0x03);
+    lt_regdump[LTRD_R12] = ReadReg_LT(0x12);
+    for (i = 0; i < 6; i++) lt_regdump[LTRD_PLL + i] = ReadReg_LT(pll[i]);
+
+    for (i = 0; i < 5; i++) lt_regdump[LTRD_SDR + i] = ReadReg_LT(0xE0 + i);   // normal bank E0h-E4h
+    e4 = lt_regdump[LTRD_SDR + 4];
+
+    WriteRegister(0xE4); WriteData((e4 & 0x0A) | 0x04);                         // select the timing-parameter bank
+    lt_regdump[LTRD_E4_TBANK] = ReadReg_LT(0xE4);
+    for (i = 0; i < 4; i++) lt_regdump[LTRD_TIM + i] = ReadReg_LT(0xE0 + i);
+    WriteRegister(0xE4); WriteData(e4 & 0x0A);                                  // back to the normal bank
+    lt_regdump[LTRD_E4_AFTER] = ReadReg_LT(0xE4);
+    for (i = 0; i < 4; i++) lt_regdump[LTRD_SDR_AGAIN + i] = ReadReg_LT(0xE0 + i);
+
+    lt_regdump[LTRD_MAGIC + 0] = 'L';
+    lt_regdump[LTRD_MAGIC + 1] = 'T';
+    lt_regdump[LTRD_MAGIC + 2] = 'R';
+    lt_regdump[LTRD_MAGIC + 3] = 'D';
+    lt_regdump[LTRD_SEQ]++;
+}
+#endif
 
 //**************************************************************************************************
 // Boot logo: a 1-bit bitmap (boot_logo.h) drawn in one colour on black into the visible page.

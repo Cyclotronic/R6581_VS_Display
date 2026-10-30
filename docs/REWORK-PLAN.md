@@ -4,7 +4,7 @@ A staged plan for reworking the display firmware: what is wrong, what to keep, a
 is small enough to build, flash and check on the bench before the next one starts, and each can be turned off at build time
 until it has proved itself. Register references are to the LT768x datasheet V4.1 in `reference/lt7680/`.
 
-Status: **plan only, nothing implemented yet.**
+Status: **Stage 0 tooling built, not yet run on the bench** (branch `rework/stage0-regdump`). Later stages not started.
 
 ## Contents
 
@@ -164,6 +164,19 @@ Goal: measure before changing anything, so every later stage has a comparison.
 - Add `-DLT_REGDUMP=1`: after init, read `E0h-E4h` in the normal bank, then set `E4h` bit 2 and read `E0h-E3h` in the
   timing bank, then clear it. Also read `05h-0Ah` and the status register, and store them all in a `volatile` array for
   `tools/swd.py`.
+- **Built:** `LT_REGDUMP` in `lt7680.c`/`lt7680.h`, hooked in `main.c` after `SendAllToLT7680_LT()` and in the main loop
+  (`lt_regdump_request`), and `tools/regdump.py`. With the option off, the `-O2` image is byte-identical to `no1v-O2`.
+  To run it on the bench:
+
+  ```bash
+  OPT=2 EXTRA_CFLAGS="-DLT_REGDUMP=1" bash docs/tools/build.sh regdump-O2
+  python docs/tools/regdump.py --elf docs/tools/images/regdump-O2/firmware.elf --save regdump-boot.json
+  # after the DISPLAY OFF soak:
+  python docs/tools/regdump.py --elf docs/tools/images/regdump-O2/firmware.elf --again --save regdump-soak.json
+  ```
+
+  The dump switches `E4h` to the timing bank and back, using the same two `E4h` writes `SDRAM_Init_LT()` already makes
+  (bit 2 set, then cleared), and never writes bit 0 (start init) as 1.
 - Record from the current `-O2` build:
   - the register dump
   - the `TIMING_PROBE` numbers

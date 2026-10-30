@@ -585,6 +585,9 @@ int main(void) {
 	SendAllToLT7680_LT();			// run subs to setup LT7680 based on Levetop info
 
 	HAL_Delay(10);
+#if LT_REGDUMP
+	LT_RegDump();					// register readback for SWD (tools/regdump.py)
+#endif
 
 	// Main loop timer
 	SetTimerDuration(35);			// 35 ms timed action set
@@ -739,6 +742,13 @@ int main(void) {
 		NVIC_EnableIRQ(SPI1_IRQn);						// Re-enable the TFT SPI NVIC interrupts
 
 		task_ready = 1; // Mark tasks as complete so the timer driven code is allowed to run again
+
+#if LT_REGDUMP
+		if (lt_regdump_request) {		// set over SWD by tools/regdump.py --again
+			LT_RegDump();
+			lt_regdump_request = 0;
+		}
+#endif
 
 		//*******************************************************************************************
 		// Timed Action - Check if timer flag is set and tasks are ready and run the LCD sub

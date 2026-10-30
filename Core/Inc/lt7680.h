@@ -200,5 +200,33 @@ void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage);
 void SetCGRAMStart_LT(uint32_t addr);          // REG[DBh-DEh]: where user-defined glyph code 0 lives
 void LoadCustomGlyphs_LT(void);                // write the glyph sets into both regions
 void WaitForLT7680Ready(void);
+
+// ---- Register readback for SWD (Stage 0 of docs/REWORK-PLAN.md); build with -DLT_REGDUMP=1 ------------------
+#ifndef LT_REGDUMP
+#define LT_REGDUMP 0
+#endif
+#if LT_REGDUMP
+#define LTRD_MAGIC         0    // 4 bytes "LTRD" once the first dump is complete
+#define LTRD_SEQ           4    // dump count
+#define LTRD_STSR          5    // status register
+#define LTRD_R00           6    // REG[00h]
+#define LTRD_R01           7    // REG[01h]
+#define LTRD_R03           8    // REG[03h]
+#define LTRD_R12           9    // REG[12h]
+#define LTRD_PLL          10    // REG[05h-0Ah], 6 bytes
+#define LTRD_SDR          16    // REG[E0h-E4h], normal bank, 5 bytes
+#define LTRD_TIM          21    // REG[E0h-E3h] with E4h bit 2 set (timing-parameter bank), 4 bytes
+#define LTRD_E4_TBANK     25    // REG[E4h] read while the timing bank is selected
+#define LTRD_E4_AFTER     26    // REG[E4h] after switching back
+#define LTRD_SDR_AGAIN    27    // REG[E0h-E3h], normal bank, read again after switching back, 4 bytes
+#define LTRD_INIT_POLLS_LO 31   // Check_SDRAM_Ready_LT: number of E4h polls until bit 0 read 1
+#define LTRD_INIT_POLLS_HI 32
+#define LTRD_INIT_E4      33    // the E4h value that ended the poll
+#define LTRD_INIT_STSR    34    // status register at that moment
+#define LTRD_SIZE         36
+extern volatile uint8_t lt_regdump[LTRD_SIZE];
+extern volatile uint8_t lt_regdump_request;
+void LT_RegDump(void);
+#endif
 void DrawBootLogo_LT(uint16_t x0, uint16_t y0, uint16_t rgb565);
 uint16_t BootLogoWidth_LT(void);   // boot screen: Ian's character, white 1-bit bitmap at memory X/Y
