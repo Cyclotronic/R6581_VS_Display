@@ -4,7 +4,12 @@ A staged plan for reworking the display firmware: what is wrong, what to keep, a
 is small enough to build, flash and check on the bench before the next one starts, and each can be turned off at build time
 until it has proved itself. Register references are to the LT768x datasheet V4.1 in `reference/lt7680/`.
 
-Status: **Stage 0 tooling built, not yet run on the bench** (branch `rework/stage0-regdump`). Later stages not started.
+Status (2026-10-29):
+
+- **Stage 0 done:** the register dump on the bench confirms the SDRAM findings ([results](#stage-0-results-2026-10-29)).
+- **Stage 1 built and flashed:** registers verified on the bench. The DISPLAY OFF soak hasn't been run yet. Branch
+  `rework/stage1-sdram`.
+- Later stages not started.
 
 ## Contents
 
@@ -184,7 +189,47 @@ Goal: measure before changing anything, so every later stage has a comparison.
 - **Done when** the dump confirms the table above (refresh `0000h`, TRCD/TRAS `0h`), and there is a reference photo of
   the corruption after a long DISPLAY OFF.
 
+#### Stage 0 results (2026-10-29)
+
+**Setup:**
+- R6581T with the Blue Pill, ST-Link V2 (target 3.28 V)
+- Board running the `no1v-O2` test build (5339ab5), identical to `Prebuilt/test-2026-10-17-O2-bootscreen`
+- Settings page `17 14 2 50 30 10 60 AdaF`, boot count 10
+- Flash backup taken twice and compared: `backups/board_flash_before-rework_2026-10-29.bin` (sha256 `4c42dd9f...dc0a`)
+- Dumps saved in `captures/regdump/` (project folder)
+
+| Register | Current build (`regdump-O2`) | Stage 1 (`stage1-regdump-O2`) | Expected |
+| --- | --- | --- | --- |
+| PCLK / MCLK / CCLK | 29 / 58 / 58 MHz | same | |
+| PCLK PLL VCO | **58 MHz, outside 100-500** | same (Stage 2) | 100-500 MHz |
+| `E0h` attributes | **`28h`: 4 banks, 4,096 rows, 256 columns** | `29h`: 512 columns | `29h` |
+| `E1h` CAS latency | 3 | 3 | 3 |
+| `E2h-E3h` refresh | **`0000h`, auto-refresh disabled** | 870 clocks = 15.0 us per row | <= 15.625 us |
+| Timing bank `E0h-E3h` | **`29 03 9A 00`**: TRFC 1, TRCD 1, TRAS 1 clock | `02 87 20 26` (reset values): TRFC 9, TRCD 3, TRAS 7 | |
+| `E4h` | `11h` | `11h` | |
+| Status at the end of init | `54h`: SDRAM ready | `54h` | |
+| SDRAM init waits timed out | | 0 | 0 |
+
+**Answers to the open questions:**
+- `E0h` resets to `28h`, so the current build runs the SDRAM as 8 MB with 256 columns. Everything in use is below 8 MB.
+- `E4h` bit 0 does read back 1 once initialisation is done. Status bit 2 agrees.
+- Bit 4 of `E4h` also reads 1 (not documented in the extracted table).
+- The timing-bank reset values (`02 87 20 26`) match the datasheet defaults. Stage 1 leaves them alone.
+
+On the Stage 1 build the meter decoded and displayed normally: `- 24.57779 mVDC`, `100mV Range`, annunciators
+SMPL/AUTO/AZERO/FRONT, no unmatched characters.
+
 ### Stage 1: SDRAM initialisation
+
+**Built** on `rework/stage1-sdram`:
+- `SDRAM_Init_LT()` writes the normal bank with `E4h` bit 2 clear.
+- `lt_mclk_mhz` is set by `LT7680_PLL_Initial_LT()`.
+- `SDRAM_SetRefresh_LT()` calculates the refresh interval from MCLK (`SDRAM_REFRESH_NS` = 15 us). Timing-adjust mode
+  calls it again after reprogramming the PLL.
+- The ready-wait checks both `E4h` bit 0 and status bit 2, with a 100 ms timeout counted in `lt_sdram_init_timeouts`.
+- `-DSDRAM_INIT_LEGACY=1` builds Ian's sequence.
+- The register checks above pass. The soak and menu-walk checks below are still to do.
+
 
 Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and the most likely cure for the corruption.
 
@@ -333,9 +378,9 @@ Run for every stage that ships an image:
 
 | Question | Settled by | Affects |
 | --- | --- | --- |
-| Reset value of `E0h` (256 or 512 columns) | Stage 0 dump | how urgent Stage 1 is for addresses above 8 MB (none in use today) |
+| ~~Reset value of `E0h` (256 or 512 columns)~~ | **Answered:** `28h`, 256 columns | |
+| ~~Does `E4h` bit 0 read back as "init done"?~~ | **Answered:** yes; status bit 2 agrees | |
 | Are the reset timing-bank values right for this SDRAM at 100 MHz? | dump + soak at the Stage 2 clocks | whether Stage 1 writes the timing bank |
-| Does `E4h` bit 0 read back as "init done", or only status bit 2? | Stage 0 | the Stage 1 poll |
 | Multi-byte data after one control byte in a CS frame | Stage 5 experiment | glyph and memory-write speed |
 | Highest reliable SPI1 clock on this wiring | Stage 5 scope + readback loop | bus speed |
 | Cause of the right-edge "random pixels" | Stage 6 with the wipe off | whether the wipe stays |

@@ -63,7 +63,10 @@ void SetTextColors(uint32_t foreground, uint32_t background);
 void LT7680_PLL_Initial_LT(void);
 void Configure_Main_PIP_Window_LT(void);
 void SDRAM_Init_LT(void);
-void Check_SDRAM_Ready_LT(void);
+void SDRAM_SetRefresh_LT(void);         // rewrite the refresh interval for lt_mclk_mhz (after any PLL change)
+void Check_SDRAM_Ready_LT(void);        // SDRAM_INIT_LEGACY only
+extern uint16_t lt_mclk_mhz;            // memory clock programmed by LT7680_PLL_Initial_LT()
+extern volatile uint16_t lt_sdram_init_timeouts;
 void Set_LCD_Panel_LT(void);
 void LCD_HorizontalWidth_VerticalHeight_LT(uint16_t WX, uint16_t HY);
 void LCD_Horizontal_Non_Display_LT(uint16_t val);
@@ -146,6 +149,18 @@ extern uint32_t REFRESH_RATE;
 #define SCLK_MAX				65			// Max allowable	65
 #define MCLK_MAX				100			// Max allowable	100
 #define CCLK_MAX				100			// Max allowable	100
+#define LT_XI_MHZ				10u			// LT7680 crystal (XI)
+// SDRAM set-up (Stage 1 of docs/REWORK-PLAN.md). SDRAM_INIT_LEGACY=1 restores Ian's sequence, which writes E0h-E3h
+// into the timing-parameter bank and leaves auto-refresh disabled; kept only for A/B comparison.
+#ifndef SDRAM_INIT_LEGACY
+#define SDRAM_INIT_LEGACY		0
+#endif
+#define SDRAM_ATTR				0x29		// REG[E0h] for LT7680A-R: 4 banks, 4,096 rows, 512 columns (datasheet table 19-6)
+#ifndef SDRAM_REFRESH_NS
+#define SDRAM_REFRESH_NS		15000u		// one row every 15 us: 64 ms / 4,096 rows = 15.625 us, less ~4% margin
+#endif
+#define SDRAM_INIT_TIMEOUT_MS	100u		// give up waiting for SDRAM init after this (counted in lt_sdram_init_timeouts)
+// Ian's values, used only by the legacy sequence:
 #define SDRAM_MCLK				20			// MHz
 #define SDRAM_CLKFREQ			64000000	// SDRAM clock frequency in Hz (clock source)		64000000
 #define SDRAM_SIZE				8192		// 2048 = 64Mb, 8192 = 128Mb (depends on LT768x used), LT7680A-R is 128Mb

@@ -899,6 +899,9 @@ void LT7680_PLL_Initial_LT() {
     WriteData(lpllN_cclk & 0xFF);                                                       // 36
     //WriteData(0x56);          // test
 
+    // Remember the memory clock actually programmed: Fout = XI * N / (R * OD), OD code 2 = divide by 2
+    lt_mclk_mhz = (uint16_t)((LT_XI_MHZ * lpllN_mclk) / (lpllR_mclk * 2u));
+
     // Trigger PLL reconfiguration (Register 0x00)
     WriteRegister(0x00);
     WriteData(0x80);
@@ -952,6 +955,73 @@ void Configure_Main_PIP_Window_LT() {
 }
 
 
+
+uint16_t lt_mclk_mhz;                   // memory clock set by LT7680_PLL_Initial_LT(), used for the SDRAM refresh
+volatile uint16_t lt_sdram_init_timeouts;   // SDRAM init waits that ran out (read over SWD)
+
+#if !SDRAM_INIT_LEGACY
+// Auto-refresh interval in memory clocks: one row every SDRAM_REFRESH_NS (64 ms / 4,096 rows = 15.625 us, less a margin).
+// REG[E2h-E3h] = 0 would disable refresh, so never return 0.
+static uint16_t SDRAM_RefreshInterval(uint16_t mclk_mhz) {
+    uint32_t itv;
+    if (mclk_mhz == 0) mclk_mhz = MCLK_MAX;             // unknown clock: assume the fastest, which refreshes most often
+    itv = ((uint32_t)mclk_mhz * SDRAM_REFRESH_NS) / 1000u;
+    if (itv > 0xFFFF) itv = 0xFFFF;
+    if (itv < 1) itv = 1;
+    return (uint16_t)itv;
+}
+
+// Write the refresh interval for the current memory clock. Normal register bank (REG[E4h] bit 2 = 0) must be selected,
+// which it always is after SDRAM_Init_LT(). Call again whenever the PLL is reprogrammed.
+void SDRAM_SetRefresh_LT(void) {
+    uint16_t itv = SDRAM_RefreshInterval(lt_mclk_mhz);
+    WriteRegister(0xE2); WriteData(itv & 0xFF);
+    WriteRegister(0xE3); WriteData(itv >> 8);
+}
+
+// Wait for SDRAM initialisation to finish: REG[E4h] bit 0 reads 1 (what Ian's code polled) and the status register's
+// SDRAM-ready bit 2 is set (what the Levetop library polls). Gives up after SDRAM_INIT_TIMEOUT_MS and counts it.
+static void SDRAM_WaitReady_LT(void) {
+    uint32_t t0 = HAL_GetTick();
+    uint8_t e4 = 0, stsr = 0;
+#if LT_REGDUMP
+    uint16_t polls = 0;
+#endif
+    for (;;) {
+        WriteRegister(0xE4);
+        e4 = ReadData();
+        stsr = ReadStatus();
+#if LT_REGDUMP
+        if (polls < 0xFFFF) polls++;
+#endif
+        if ((e4 & 0x01) && (stsr & 0x04)) break;
+        if ((HAL_GetTick() - t0) >= SDRAM_INIT_TIMEOUT_MS) { lt_sdram_init_timeouts++; break; }
+    }
+#if LT_REGDUMP
+    lt_regdump[LTRD_INIT_POLLS_LO] = polls & 0xFF;
+    lt_regdump[LTRD_INIT_POLLS_HI] = polls >> 8;
+    lt_regdump[LTRD_INIT_E4] = e4;
+    lt_regdump[LTRD_INIT_STSR] = stsr;
+#endif
+}
+
+// SDRAM set-up for the LT7680A-R (datasheet V4.1, REG[E0h-E4h]). Stage 1 of docs/REWORK-PLAN.md.
+// The attribute, mode and refresh registers are written with REG[E4h] bit 2 clear, so they land in the normal bank;
+// the timing-parameter bank (bit 2 set) is left at its reset values. Then initialisation is started with bit 0.
+void SDRAM_Init_LT(void) {
+    WriteRegister(0xE4); WriteData(0x00);   // normal register bank, initialisation not started
+    WriteRegister(0xE0); WriteData(SDRAM_ATTR);   // 4 banks, 4,096 rows, 512 columns
+    WriteRegister(0xE1); WriteData(0x03);   // CAS latency 3
+    SDRAM_SetRefresh_LT();                  // REG[E2h-E3h] from the real memory clock
+    WriteRegister(0xE4); WriteData(0x01);   // start initialisation
+    SDRAM_WaitReady_LT();
+    HAL_Delay(10);                          // settle, as the original sequence did
+}
+
+#else
+// Ian's original sequence (build with -DSDRAM_INIT_LEGACY=1 for A/B comparison). It sets REG[E4h] bit 2 first, so the
+// E0h-E3h writes below go to the timing-parameter bank and the refresh interval is left at 0 (refresh disabled).
+void SDRAM_SetRefresh_LT(void) { }
 
 // Register 0xE0, 0xE1, 0xE2, 0xE3, 0xE4
 void SDRAM_Init_LT() {
@@ -1031,6 +1101,7 @@ void Check_SDRAM_Ready_LT() {
     HAL_Delay(10);  // 10 ms delay
 
 }
+#endif // SDRAM_INIT_LEGACY
 
 
 // Register 0x01, 0x02, 0x03, 0x012, 0x13

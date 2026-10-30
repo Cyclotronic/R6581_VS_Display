@@ -166,6 +166,7 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | `ONE_VOLT_MODE=1` | 0 | Ian's 1 V display mode (DCV press on the 1000 mV range shows volts); see [ONE-VOLT-MODE.md](ONE-VOLT-MODE.md) |
 | `GLYPH_SELFTEST=1` | 0 | Runs a glyph and layout test pattern once at boot (12 pages) before normal operation; for checking the display, not for normal use |
 | `TIMING_PROBE=1` | 0 | Keeps cycle-count timing variables (`tp_*`) readable over SWD; see [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) |
+| `SDRAM_INIT_LEGACY=1` | 0 | Ian's original SDRAM set-up, which leaves auto-refresh disabled and the SDRAM timing registers wrong; only for A/B comparison. See Stage 1 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `LT_REGDUMP=1` | 0 | Reads the LT7680 PLL, panel and SDRAM registers (both SDRAM register banks) into `lt_regdump[]` after init, and again on request; decode with `tools/regdump.py`. Stage 0 of [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `OPT=0/2/s` (environment, not a -D) | 0 | Optimisation level |
 

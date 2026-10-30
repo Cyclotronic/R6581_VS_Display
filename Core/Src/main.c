@@ -898,6 +898,7 @@ int main(void) {
 							//HAL_Delay(5);
 							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
 							LT7680_PLL_Initial_LT();
+							SDRAM_SetRefresh_LT();		// the memory clock follows PCLK, so the refresh interval must too
 							//HAL_Delay(5);
 							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
 							LCD_Horizontal_Non_Display_LT(LCD_HBPD);  // Horizontal Back Porch
