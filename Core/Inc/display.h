@@ -72,6 +72,7 @@ void DisplayAnnunciators(void);
 #endif
 #define RENDER_VERIFY_MS 5000   // how often the live loop runs the check
 #define RENDER_SELFTEST_STEPS 60   // synthetic screens checked before the live loop
+extern volatile uint32_t render_cells, render_ann;
 uint8_t Render_Update(uint8_t all);   // draw what changed (everything if all); returns 1 if anything was drawn
 #if RENDER_VERIFY
 uint32_t Render_Verify(void);

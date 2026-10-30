@@ -1,7 +1,7 @@
 # Boot diagnostics and the splash screen
 
 > **Since the rework (2026-10-30) the boot screen is off by default** (`BOOT_DIAG_SHOWS=0`): the board goes straight to
-> the live display, which now shows the meter's first frame about 0.21 s after reset (Stage 7 in
+> the live display, which can show the meter's first frame 0.14 s after reset (Stage 7 in
 > [REWORK-PLAN.md](REWORK-PLAN.md)). Build with `-DBOOT_DIAG_SHOWS=10` to get the behaviour below back. Holding DCV at
 > power-up still enters the timing-adjust mode; it only resets the boot count when the boot screen is built in.
 

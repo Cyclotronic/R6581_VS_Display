@@ -162,6 +162,9 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | Option | Default | Effect |
 | --- | --- | --- |
 | `BOOT_DIAG_SHOWS=n` | 0 | Number of boots that show the speed test and boot screen (0 = never, 10 = the pre-rework behaviour, 255 = every boot) |
+| `LCD_BIT_US=n`, `LCD_CS_US=n` | 1, 1 | Bit-banged SPI to the ST7701S: half clock period and chip-select hold, in microseconds. Ian used 5 and 10 |
+| `CAPTURE_CONFIRM=1` | 0 | Stage 4's first capture rule: every frame must be seen twice before it is decoded. Halves the update rate and freezes the display at 0.1 PLC and faster; for A/B comparison only |
+| `BOOT_TRACE=1` | 0 | Bench: records the first 6 s after power-up (frames, draws, PA11/PA12) for reading over SWD |
 | `TIMING_MODE_CHECK_MS=n` | 2300 | When PA12 (DCV held at power-up) is read to choose timing-adjust mode. Earlier than about this, a cold power-up reads it high by mistake |
 | `BOOT_SETTLE_MS=n` | 20 | Wait before the LT7680 set-up; Ian had 1000 for no stated reason. The set-up polls and retries, so a short wait is safe on a warm reset; confirm on cold power-ups |
 | `BOOT_SCREEN_MS=n` | 4000 | How long the boot screen stays up |

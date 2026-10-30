@@ -284,15 +284,31 @@ void ReorderAnnunciators(void) {
 }
 
 
-void Main_Aux_R6581(void) {
+// Decode chars[] (from Packets_to_chars) into text[1..47], G1 to G18 MAIN, G19 to G47 AUX. A cell whose bitmap is the
+// same as last time keeps its character without a table search. Returns the number of cells not in the table ('?').
+uint8_t Decode_Text(char* text)
+{
+	static uint8_t last_bitmap[CHAR_COUNT][CHAR_HEIGHT];
+	static char last_char[CHAR_COUNT];
+	static uint8_t have_last = 0;
 	uint8_t unmatched = 0;
 
-	ReorderAnnunciators();  // re-order the annunciators so Annunnciator[1] is above G1
-
-	for (int i = 0; i < CHAR_COUNT; i++) {      // G1 to G18 MAIN, G19 to G47 AUX
-		G[i + 1] = BitmapToChar(chars[i]);
-		if (G[i + 1] == '?') unmatched = 1;
+	for (int i = 0; i < CHAR_COUNT; i++) {
+		if (!have_last || memcmp(chars[i], last_bitmap[i], CHAR_HEIGHT) != 0) {
+			last_char[i] = BitmapToChar(chars[i]);
+			memcpy(last_bitmap[i], chars[i], CHAR_HEIGHT);
+		}
+		text[i + 1] = last_char[i];
+		if (last_char[i] == '?') unmatched++;
 	}
+	have_last = 1;
+	return unmatched;
+}
+
+// Make a decoded frame the screen: text[1..47] into G[], the annunciator flags into Annunc[]
+void Main_Aux_Commit(const char* text, uint8_t unmatched) {
+	ReorderAnnunciators();  // re-order the annunciators so Annunnciator[1] is above G1
+	memcpy(&G[1], &text[1], CHAR_COUNT);
 	cap_decodes++;
 	if (unmatched) cap_unmatched++;
 
@@ -305,4 +321,10 @@ void Main_Aux_R6581(void) {
 		if (n >= (int)sizeof(LCD_buffer_bitmaps)) break;
 	}
 #endif
+}
+
+void Main_Aux_R6581(void) {
+	char text[CHAR_COUNT + 1];
+	uint8_t unmatched = Decode_Text(text);
+	Main_Aux_Commit(text, unmatched);
 }

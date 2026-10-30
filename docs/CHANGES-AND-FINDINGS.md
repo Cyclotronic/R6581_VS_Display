@@ -31,9 +31,10 @@ panel. The results sections of that file have the numbers; the visual checks sti
 | 1 | SDRAM set-up per the datasheet: refresh on, interval from the memory clock, init polled with a timeout | Display memory decayed: the likely cause of the ohm and left-column corruption after DISPLAY OFF | Retention soak: Ian's set-up loses up to 3% of bits in 10 minutes, the new one none |
 | 2 | Every LT7680 PLL inside its VCO range; memory and core clocks 100 MHz, independent of the pixel clock | Ian's pixel-clock PLL ran below its minimum | Registers verified, soak clean |
 | 3 | Start-up waits polled with timeouts, PLL read-back, retry with a hardware reset, fault line or LED blink | Fixed delays, and no way to tell a dead controller | Live display 0.5 s sooner; a held reset recovers |
-| 4 | Capture keeps whole frames only and decodes a frame after seeing it twice | The rare `?` came from decoding while DMA wrote the buffer | No `?` in 5 minutes, against 5 or 6 |
+| 4 | Capture keeps whole frames only (since the GPIB tests each is decoded at once; at first a frame had to be seen twice) | The rare `?` came from decoding while DMA wrote the buffer | No `?` in any run since; the board follows the meter's 111 frames a second |
 | 5 | LT7680 bus on SPI1 registers at 18 MHz, address skipping, register cache | HAL was half of every redraw | Redraw 15.0 to 6.6 ms; burst writes proven |
 | 6 | Draw only the cells and annunciators that changed, as soon as a frame is stable; rectangle `ClearScreen()` | Everything was redrawn every 35 ms, then a 6 ms wait | Change-to-screen 32.6 to 10.7 ms on average; read-back matches a full redraw pixel for pixel |
+| after 7 | Boot: LT7680 set-up inside the panel's 120 ms wait, faster panel SPI. Capture: every whole frame decoded at once | Fastest start-up; the two-frame rule froze the display at 0.1 PLC and faster | First frame 0.14 s after reset; latency about 1 ms at up to 111 updates a second |
 | 7 | Files split by job (see the repository map in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md)); dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear fixed | Readability, and two latent bugs | Same results on the bench as Stage 6 |
 
 ## Test editions (ready-to-flash builds)

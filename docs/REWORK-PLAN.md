@@ -20,8 +20,10 @@ Status (2026-10-30):
   10.7 ms on average instead of 32.6, and the screen read back from display memory matches Ian's full redraw pixel for
   pixel ([results](#stage-6-results-2026-10-30)).
 - **Stage 7 done:** one job per file, dead code gone, two small bugs fixed; same bench results as Stage 6. The boot path
-  was trimmed too: the meter's first frame is on screen 0.21 s after reset, against about 2.9 s for Ian's start-up
-  ([results](#stage-7-results-2026-10-30)).
+  was trimmed too: the meter's first frame can be drawn 0.14 s after reset, against about 2.9 s for Ian's start-up
+  ([results](#stage-7-results-2026-10-30)). GPIB tests then found and fixed a fault in the capture rule: the board now
+  follows the meter's display at its full 111 frames a second, about 1 ms behind
+  ([after Stage 7](#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30)).
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 
 ## Contents
@@ -686,8 +688,7 @@ What's left in the 214 ms:
 - About 12 ms for the first frame. Capture has been running, but the stable-frame rule still needs one more matching
   frame once the loop starts, and then the full draw.
 
-The next saving would be to run the LT7680 set-up inside the panel's 120 ms wait, for about 50 ms. It changes the order
-the panel sees its set-up, so it should wait until the panel can be watched.
+The next saving, running the LT7680 set-up inside the panel's 120 ms wait, was done afterwards (below).
 
 **Cold power-up:** the first one failed. The display stayed blank because the board was in timing-adjust mode. That
 mode is chosen at start-up when PA12 reads high (DCV held), and on a cold power-up PA12 still reads high for a while,
@@ -699,6 +700,88 @@ Fix: the live display starts at once, and the main loop reads PA12 at `TIMING_MO
 code did. If it's high, the screen clears and timing-adjust mode starts. Confirmed on the bench by power-cycling the
 meter: the display comes up. Holding DCV through power-up to enter timing-adjust mode is still to be checked (deferred
 item 3).
+
+#### After Stage 7: boot, capture rule and GPIB tests (2026-10-30)
+
+With the panel now visible on the bench, and the meter reachable over GPIB (NI-VISA `GPIB0::27::INSTR`, which answers
+`ADVANTEST,R6581T,0,A01`; commands from `scpi_references/Advantest_R6581T_DMM_SCPI.md`).
+
+**Boot, further trimmed:**
+
+- **LT7680 set-up inside the panel's wait.** The ST7701S set-up is split around its mandatory 120 ms after Sleep Out
+  (`AdaFruit_Init_Start/Finish`, `BuyDisplay_Init_Start/Finish`, `LCD_SLEEPOUT_MS`), and the LT7680 set-up runs in
+  that wait. `AdaFruit_Init()` and `BuyDisplay_Init()` still do the whole thing, for the timing-adjust mode.
+- **Settings now load first.** The panel type picks the panel set-up, so `Settings_Load()` moved ahead of the LT7680
+  set-up. The side effect is intended: the LT7680 now starts with the stored TFT timings. Ian's start-up set it up
+  before loading them, so it always started on the built-in defaults and only the panel type came from flash. Nothing
+  changes on a unit whose stored set is the default set.
+- **Faster panel SPI.** The bit-banged SPI to the ST7701S runs at a 1 us half-period instead of Ian's 5 us, with 1 us
+  instead of 10 us around chip select (`LCD_BIT_US`, `LCD_CS_US`). The ST7701S's own limit is tens of nanoseconds.
+
+Boot timeline (10 SWD resets each, all within a few ms of each other, no retries or faults):
+
+| Build | Panel at Sleep Out | LT7680 set up | Panel set up | First meter frame drawable |
+|---|---|---|---|---|
+| Stage 7 as committed | | 51 ms | 201 ms | 214 ms |
+| + LT7680 inside the panel wait | 28 ms | 58 ms | 148 ms | 162 ms |
+| **+ 1 us panel SPI (`-O2`)** | **10 ms** | **50 ms** | **130 ms** | **140 ms** (138-143) |
+| same, `-O0` | 12 ms | 51 ms | 132 ms | 145 ms |
+
+The floor is now the panel: 10 ms of set-up plus its 120 ms after Sleep Out. The LT7680 starts at 20 ms
+(`BOOT_SETTLE_MS`) and is done at 50 ms. On a cold power-up the meter sends its first frame later than that (below),
+so the board waits for the meter.
+
+**The meter's own start-up** (cold power-up, `-DBOOT_TRACE=1`, read with `tools/boottrace.py`):
+
+| Time after power-on | Meter's display | Drawn at |
+|---|---|---|
+| 0.20 s | (nothing sent yet) | blank screen |
+| 0.34 s | `R6581T` / `Ver.A01  GPIB Addr:27` | 0.341 s |
+| 2.51 s | `RUNNING SELF TEST` | 2.513 s |
+| 3.01 s | blank (the self-test text blinks) | 3.008 s |
+| 3.22 s | `RUNNING SELF TEST` | 3.226 s |
+| 3.59 s | `mVDC` / `100mV Range`, no digits yet | 3.588 s |
+| 3.98 s | autorange to `1000mV Range` | 3.982 s |
+| 4.42 s | first reading | 4.426 s |
+
+PA12 read high only on the first tick (0.20 s) and low from 0.24 s on. The power-on screen used to be missed
+entirely, because the display came up at about 2.9 s.
+
+**Capture rule fixed.** An integration-time sweep over GPIB showed that Stage 4's rule (decode a frame only after
+seeing the same bytes twice) freezes the display when the reading changes in every 9 ms frame, which happens at 0.1 PLC
+and faster. The rule also capped updates at half the VFD's frame rate, and dropped changes that lasted only one frame.
+The whole-frame copy (`Capture_FrameEnd`) is what removed the torn frames; the second-frame rule wasn't needed.
+
+Now every new frame is decoded and drawn at once. Only a frame holding a pattern not in the font table waits to be seen
+twice (`cap_heldback` counts those). `CAPTURE_CONFIRM=1` restores the old rule. `Decode_Text()` skips the table
+search for cells whose bitmap hasn't changed.
+
+Sweep (`tools/sweep.py`, 1 V range fixed, 30 s per step, `TIMING_PROBE` at `-O2`, meter input about -0.3 V):
+
+| Meter setting | Frames/s | Changes drawn/s, two-frame rule | Changes drawn/s, now | Latency avg, now |
+|---|---|---|---|---|
+| 10 PLC, 7 digits | 110.8 | 5.8 | 8.0 | 0.89 ms |
+| 1 PLC, 7 digits | 110.8 | 26.9 | 44.2 | 0.86 ms |
+| 0.06 PLC (0.1 asked), 6 digits | 110.6 | **0 (frozen)** | 110.6 | 1.25 ms |
+| 0.006 PLC, 5 digits | 110.6 | **0** | 110.5 | 1.15 ms |
+| 0.00006 PLC (MIN), 4 digits | 110.7 | **0** | 110.7 | 1.02 ms |
+| MIN, 4 digits, auto-zero off | 110.7 | 0.07 | 110.6 | 0.99 ms |
+
+- **Frame rate:** the meter refreshes its display every 9.0 ms (110.5-110.9 frames a second) whatever the reading
+  rate. That is the most often its display can change, and the board now follows it frame for frame.
+- **Latency:** from frame end to draw end, about 1 ms. The worst case, 6.7 ms, is when the 10 s full repaint coincides.
+- **Torn frames:** none. In every step, and in 3 minutes at the fastest setting (19,921 frames, 9,340 changes), 0
+  frames were held back, 0 had an unknown pattern, and 0 short frames arrived. The meter has never handed over a
+  half-written character since the whole-frame copy went in.
+- **For comparison, Ian's loop** redrew at most 28.6 times a second (one per 35 ms tick), about 20 on ohm screens, and
+  could draw a frame the DMA was still writing.
+
+**DISPLAY OFF from GPIB:** `DISP OFF` makes the meter show `DISPLAY OFF`, and the board turned the panel and backlight
+off (`displayBlank` 1). `DISP ON` brought them back, with the glyphs reloaded and a full repaint; the reading was back
+within 3 s.
+
+The meter's settings were saved before the tests and restored after (DCV, 100 mV autorange, 7 digits, 10 PLC,
+auto-zero on), then the meter was returned to local.
 
 ## Test protocol
 

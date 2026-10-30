@@ -56,9 +56,27 @@ volatile uint32_t dbg_loop_per_sec = 0;
 volatile uint32_t dbg_loop_last_ms = 0;
 volatile uint32_t dbg_loop_test_done = 0;
 volatile uint32_t boot_ready_ms = 0;	// HAL tick when the live loop starts (boot time, Stage 3 of docs/REWORK-PLAN.md)
+volatile uint32_t boot_sleepout_ms = 0;	// ... when the panel set-up reached Sleep Out (its first half is done)
 volatile uint32_t boot_lt_ms = 0;		// ... when the LT7680 set-up has finished
 volatile uint32_t boot_panel_ms = 0;	// ... when the TFT panel (ST7701S) set-up has finished
 volatile uint32_t first_frame_ms = 0;	// ... when the first decoded meter frame has been drawn
+
+// BOOT_TRACE=1 (bench): for the first BOOT_TRACE_MS after reset, record every decoded frame, every draw, and PA12 on
+// every tick, for reading over SWD after a power-up (build/s7/boottrace.py)
+#ifndef BOOT_TRACE
+#define BOOT_TRACE 0
+#endif
+#if BOOT_TRACE
+#define BOOT_TRACE_MS 6000
+typedef struct { uint16_t ms; char text[47]; uint8_t ann[3]; } BtFrame;      // G[1..47], Annunc[1..18] as bits
+typedef struct { uint16_t ms; uint16_t cells; uint8_t ann; uint8_t full; } BtDraw;
+volatile BtFrame bt_frame[40];
+volatile BtDraw bt_draw[60];
+volatile uint8_t bt_pa12[180];          // one byte per 35 ms tick: PA11 in bit 1, PA12 in bit 0
+volatile uint16_t bt_pa12_ms0;          // tick time of bt_pa12[0]
+volatile uint8_t bt_frames, bt_draws, bt_ticks, bt_timing_mode;
+volatile uint16_t bt_timing_check_ms;
+#endif
 
 
 #if TIMING_PROBE
@@ -141,7 +159,22 @@ int main(void) {
 		HAL_GPIO_TogglePin(GPIOC, TEST_OUT_Pin); // Test LED toggle
 	}
 		
-	HAL_Delay(BOOT_SETTLE_MS);		// was Ian's 1 s; see lt7680.h
+	// DCV held at power-up (timing-adjust mode) is decided in the main loop at TIMING_MODE_CHECK_MS, not here: this early,
+	// on a cold power-up, PA12 still reads high because the meter is not yet driving its key lines.
+	timingModsOnBoot = false;
+
+	// Settings first: the panel type picks the panel set-up, and the LT7680 set-up uses the stored TFT timings.
+	// (Ian's start-up set up the LT7680 before loading them, so it always started on the built-in defaults.)
+	Settings_Load();
+	if (strcmp(ADA_BUY, "AdaF") != 0 && strcmp(ADA_BUY, "BuyD") != 0) strcpy(ADA_BUY, "AdaF");	// default panel
+	uint8_t buyDisplay = (strcmp(ADA_BUY, "BuyD") == 0);
+
+	// Panel (ST7701S) set-up, first half: up to Sleep Out. The panel then needs LCD_SLEEPOUT_MS before its next command,
+	// and the LT7680 set-up runs in that time instead of after it.
+	if (buyDisplay) BuyDisplay_Init_Start(); else AdaFruit_Init_Start();
+	boot_sleepout_ms = HAL_GetTick();
+
+	while (HAL_GetTick() < BOOT_SETTLE_MS) { }	// the LT7680 still gets BOOT_SETTLE_MS from reset (lt7680.h)
 
 	// Reset the LT7680 and run subs to setup LT7680 based on Levetop info; retried once. If the controller does not
 	// answer at all, blink the test LED (PC13) and keep retrying: nothing else is useful without a display.
@@ -165,30 +198,10 @@ int main(void) {
 
 	ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 
-	// DCV held at power-up (timing-adjust mode) is decided in the main loop at TIMING_MODE_CHECK_MS, not here: this early,
-	// on a cold power-up, PA12 still reads high because the meter is not yet driving its key lines.
-	timingModsOnBoot = false;
-
-
-	Settings_Load();				// TFT timing settings from the flash page (defaults written there if invalid)
-
-	// ST7701S critical setting
-	if (strcmp(ADA_BUY, "AdaF") == 0) {
-		AdaFruit_Init(); // Initialize AdaFruit driver
-	}
-	else if (strcmp(ADA_BUY, "BuyD") == 0) {
-		BuyDisplay_Init(); // Initialize BuyDisplay driver
-	}
-	else {
-		strcpy(ADA_BUY, "AdaF");
-		AdaFruit_Init(); // Default - Initialize AdaFruit driver
-	}
+	// Panel set-up, second half, once LCD_SLEEPOUT_MS have passed since Sleep Out
+	while (HAL_GetTick() - boot_sleepout_ms < LCD_SLEEPOUT_MS) { }
+	if (buyDisplay) BuyDisplay_Init_Finish(); else AdaFruit_Init_Finish();
 	boot_panel_ms = HAL_GetTick();
-
-	// TEST sending LT7680 setup info after ST7701S setup
-	//SendAllToLT7680_LT_2();			// run subs to setup LT7680 based on Levetop info
-	//HAL_Delay(10);
-	//ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 
 	if (lt_fault) {					// LT7680 answers but part of its set-up failed: say so (now the panel is up), then carry on
 		char msg[48];
@@ -268,6 +281,14 @@ int main(void) {
 		uint8_t fresh = 0;
 #else
 		uint8_t fresh = Capture_Poll();	// decode a new, stable VFD frame if there is one
+#if BOOT_TRACE
+		if (fresh && HAL_GetTick() < BOOT_TRACE_MS && bt_frames < 40) {
+			volatile BtFrame* f = &bt_frame[bt_frames++];
+			f->ms = HAL_GetTick();
+			for (int i = 0; i < 47; i++) f->text[i] = G[i + 1];
+			for (int i = 0; i < 18; i++) if (Annunc[i + 1]) f->ann[i / 8] |= 1u << (i % 8);
+		}
+#endif
 #if TIMING_PROBE
 		if (fresh) { tp_lat_from = cap_decoded_change_cyc; tp_lat_pending = 1; }
 #endif
@@ -296,6 +317,10 @@ int main(void) {
 		// power-on); the live display runs until then.
 		if (!timing_mode_checked && HAL_GetTick() >= TIMING_MODE_CHECK_MS) {
 			timing_mode_checked = 1;
+#if BOOT_TRACE
+			bt_timing_check_ms = HAL_GetTick();
+			bt_timing_mode = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_SET;
+#endif
 			if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_SET) {
 				timingModsOnBoot = true;
 #if BOOT_DIAG_SHOWS
@@ -375,6 +400,12 @@ int main(void) {
 #else
 				DisplaySplash();		// only with SPLASH_IN_LOOP
 				render_tick = 1;		// drawing happens below, after the button is read
+#if BOOT_TRACE
+				if (HAL_GetTick() < BOOT_TRACE_MS && bt_ticks < sizeof(bt_pa12)) {
+					if (!bt_ticks) bt_pa12_ms0 = HAL_GetTick();
+					bt_pa12[bt_ticks++] = (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11) == GPIO_PIN_SET) << 1 | (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_SET);
+				}
+#endif
 #endif
 
 				// Read pins A11/A12 - Front panel DCV switch momentary - Enable 1VDC mode
@@ -438,7 +469,16 @@ int main(void) {
 #if TIMING_PROBE
 			uint32_t tp_t0 = DWT->CYCCNT;
 #endif
+#if BOOT_TRACE
+			uint32_t bt_cells0 = render_cells, bt_ann0 = render_ann;
+#endif
 			uint8_t drew = Render_Update(all);
+#if BOOT_TRACE
+			if (drew && HAL_GetTick() < BOOT_TRACE_MS && bt_draws < 60) {
+				volatile BtDraw* d = &bt_draw[bt_draws++];
+				d->ms = HAL_GetTick(); d->cells = render_cells - bt_cells0; d->ann = render_ann - bt_ann0; d->full = all;
+			}
+#endif
 #if TIMING_PROBE
 			uint32_t tp_t1 = DWT->CYCCNT;
 			tp_total_last = tp_t1 - tp_t0; if (tp_total_last > tp_total_max) tp_total_max = tp_total_last;

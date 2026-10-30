@@ -34,35 +34,35 @@ void LCD_SPI_Write(uint16_t data, uint8_t bits) {
 
 		// Toggle the clock signal
 		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_SET); // CLK high
-		DelayMicroseconds(5);                                   // Hold high
+		DelayMicroseconds(LCD_BIT_US);                                 // Hold high
 		HAL_GPIO_WritePin(LCD_SCK_Port, LCD_SCK_Pin, GPIO_PIN_RESET); // CLK low
-		DelayMicroseconds(5);                                   // Hold low
+		DelayMicroseconds(LCD_BIT_US);                                 // Hold low
 	}
 }
 
 
 void LCDWriteRegister(uint8_t reg) {
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_RESET); // Pull CS low
-	DelayMicroseconds(10);
+	DelayMicroseconds(LCD_CS_US);
 
 	// Use LCD_SPI_Write for 9-bit SPI communication
 	LCD_SPI_Write((0 << 8) | reg, 9); // D/CX = 0, reg[7:0]
 
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_SET);   // Pull CS high
-	DelayMicroseconds(10);
+	DelayMicroseconds(LCD_CS_US);
 }
 
 
 
 void LCDWriteData(uint8_t data) {
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_RESET); // Pull CS low
-	DelayMicroseconds(10);
+	DelayMicroseconds(LCD_CS_US);
 
 	// Use LCD_SPI_Write for 9-bit SPI communication
 	LCD_SPI_Write((1 << 8) | data, 9); // D/CX = 1, data[7:0]
 
 	HAL_GPIO_WritePin(LCD_CS_Port, LCD_CS_Pin, GPIO_PIN_SET);   // Pull CS high
-	DelayMicroseconds(10);
+	DelayMicroseconds(LCD_CS_US);
 }
 
 
@@ -125,7 +125,8 @@ void LCD_Hor_Ver_Timing() {
 }
 
 
-void AdaFruit_Init() {
+// First half of the panel set-up, up to and including Sleep Out (11h)
+void AdaFruit_Init_Start() {
 
 	//ST7701S+AUO4.58
 	//https://cdn-shop.adafruit.com/product-files/5805/AUO4.58-ST7701S-3W-RGB18BIT_initcode.txt
@@ -379,8 +380,10 @@ void AdaFruit_Init() {
 	LCDWriteData(0x00);
 
 	LCDWriteRegister(0x11);
+}
 
-	HAL_Delay(120);
+// Second half: after LCD_SLEEPOUT_MS from Sleep Out (the caller waits, and may do other work meanwhile)
+void AdaFruit_Init_Finish() {
 
 	LCDWriteRegister(0x35);
 	LCDWriteData(0x00);
@@ -394,8 +397,15 @@ void AdaFruit_Init() {
 	LCDWriteRegister(0x29);
 }
 
+void AdaFruit_Init() {
+	AdaFruit_Init_Start();
+	HAL_Delay(LCD_SLEEPOUT_MS);
+	AdaFruit_Init_Finish();
+}
 
-void BuyDisplay_Init() {
+
+// First half of the panel set-up, up to and including Sleep Out (11h)
+void BuyDisplay_Init_Start() {
 
 	// Refer to ST7701S datasheet and your TFT LCD datasheet in order to make teh following settings
 
@@ -663,7 +673,10 @@ void BuyDisplay_Init() {
 	LCDWriteData(0x00);	//00000b
 
 	LCDWriteRegister(0x11);			// SLPOUT (11h/1100h): Sleep Out  
-	HAL_Delay(120);
+}
+
+// Second half: after LCD_SLEEPOUT_MS from Sleep Out (the caller waits, and may do other work meanwhile)
+void BuyDisplay_Init_Finish() {
 
 	//LCDWriteRegister(0x34);			// TEON (35h/3500h): Tearing Effect Line OFF
 	//LCDWriteData(0x00);
@@ -676,4 +689,10 @@ void BuyDisplay_Init() {
 	//LCDWriteData(0x66);				// 18bpp
 	
 	LCDWriteRegister(0x29); 		// DISPON (29h/2900h): Display On 
+}
+
+void BuyDisplay_Init() {
+	BuyDisplay_Init_Start();
+	HAL_Delay(LCD_SLEEPOUT_MS);
+	BuyDisplay_Init_Finish();
 }
