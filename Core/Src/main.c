@@ -589,6 +589,9 @@ int main(void) {
 #if LT_REGDUMP
 	LT_RegDump();					// register readback for SWD (tools/regdump.py)
 #endif
+#if LT_BUS_TEST && !LT_BUS_HAL
+	LT_BusTest();					// register read-backs and the burst-write experiment (Stage 5)
+#endif
 
 	// Main loop timer
 	SetTimerDuration(35);			// 35 ms timed action set
@@ -769,6 +772,12 @@ int main(void) {
 			LT_RegDump();
 			lt_regdump_request = 0;
 		}
+#if !LT_BUS_HAL && LT_REG_CACHE
+		{								// once a second, check the register cache against the chip
+			static uint32_t last_check = 0;
+			if (HAL_GetTick() - last_check >= 1000) { last_check = HAL_GetTick(); LT_CacheCheck(); }
+		}
+#endif
 #endif
 
 		//*******************************************************************************************

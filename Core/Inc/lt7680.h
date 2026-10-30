@@ -189,6 +189,29 @@ extern uint32_t lt_pclk_khz;
 #define LT_INIT_TRIES			2u			// a failed init is retried once with a hardware reset
 #define BOOT_SETTLE_MS			1000u		// wait before the LT7680 set-up (Ian's; purpose unknown, a candidate to trim)
 #define LT_FAULT_SHOW_MS		3000u		// how long an init fault line stays up
+// Bus layer (Stage 5 of docs/REWORK-PLAN.md). LT_BUS_HAL=1 restores Ian's HAL byte functions (and 9 MHz) for A/B comparison.
+#ifndef LT_BUS_HAL
+#define LT_BUS_HAL				0
+#endif
+#ifndef LT_REG_CACHE
+#define LT_REG_CACHE			1			// skip writes to 03h, CCh, CDh, D0h-D7h that would not change them
+#endif
+#ifndef LT_SPI_PRESC
+#if LT_BUS_HAL
+#define LT_SPI_PRESC			SPI_BAUDRATEPRESCALER_8		// 9 MHz
+#else
+#define LT_SPI_PRESC			SPI_BAUDRATEPRESCALER_4		// 18 MHz (the F103's SPI1 maximum)
+#endif
+#endif
+#ifndef LT_SPI_STATS
+#define LT_SPI_STATS			0			// count frames sent and skipped (lt_frames, lt_frames_saved)
+#endif
+#ifndef LT_BUS_TEST
+#define LT_BUS_TEST				0			// bench only: 100,000 register read-backs and a burst-write test after init
+#endif
+void LT_BusForget(void);					// forget the cached address and registers (after a reset)
+void LT_BusTest(void);
+void LT_CacheCheck(void);
 #define LT_FAULT_RESET			0x01		// status bit 1 never cleared after reset
 #define LT_FAULT_NOREPLY		0x02		// PLL registers did not read back as written: no LT7680 on the bus
 #define LT_FAULT_PLL			0x04		// REG[00h] bit 7 never set

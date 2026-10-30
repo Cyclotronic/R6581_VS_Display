@@ -174,6 +174,11 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | `LT_FAULT_TEST=n` | 0 | Bench test: holds the LT7680 in reset for the first n hardware resets, to exercise the no-reply retry (test LED blinks, then recovers) |
 | `CAPTURE_LEGACY=1` | 0 | Ian's capture: decode `rx_buffer` on every main-loop pass while DMA writes it, and the (ineffective) capture pause around drawing; for A/B comparison. See Stage 4 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `DECODE_DEBUG=1` | 0 | Keeps the aux-character bitmaps as text in `LCD_buffer_bitmaps[]` for a debugger's live watch |
+| `LT_BUS_HAL=1` | 0 | Ian's HAL byte functions at 9 MHz instead of the direct-register bus; for A/B comparison. See Stage 5 in [REWORK-PLAN.md](REWORK-PLAN.md) |
+| `LT_SPI_PRESC` | `SPI_BAUDRATEPRESCALER_4` | SPI1 rate to the LT7680 once its PLLs run (4 = 18 MHz; 8 = 9 MHz) |
+| `LT_REG_CACHE=0` | 1 | Turn off the register cache (skipping writes to 03h, CCh, CDh, D0h-D7h that don't change them) |
+| `LT_SPI_STATS=1` | 0 | Count CS frames sent and skipped (`lt_frames`, `lt_frames_saved`) |
+| `LT_BUS_TEST=1` | 0 | Bench: after init, 100,000 register read-backs and a single-byte vs burst SDRAM write test; results in `lt_bus_*`, `lt_single_errs`, `lt_burst_errs` |
 | `LT_REGDUMP=1` | 0 | Reads the LT7680 PLL, panel and SDRAM registers (both SDRAM register banks) into `lt_regdump[]` after init, and again on request; decode with `tools/regdump.py`. Stage 0 of [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `OPT=0/2/s` (environment, not a -D) | 0 | Optimisation level |
 

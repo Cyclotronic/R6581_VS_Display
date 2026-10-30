@@ -14,6 +14,8 @@ Status (2026-10-30):
   ([results](#stage-3-results-2026-10-30)).
 - **Stage 4 done:** whole, stable frames only. In 5 minutes no `?` reaches a redraw, against 5 or 6 for the current
   capture ([results](#stage-4-results-2026-10-30)).
+- **Stage 5 done:** the redraw takes 6.6 ms instead of 15.0, and the live display starts at 1.6 s
+  ([results](#stage-5-results-2026-10-30)). Bursts of data bytes in one chip-select frame work.
 - **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 - Later stages not started.
 
@@ -317,7 +319,9 @@ To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to
 6. Whether the right-edge wipe is still needed (Stage 6).
 7. Glyph self-test pages and a menu walk, compared with the photos of the current build.
 8. Boot (Stage 3): the panel comes up cleanly with the shorter reset and without the fixed gaps; no flash of garbage.
-9. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
+9. Menu walk with `menu_logger.py` (Stage 5 asked for it): it needs someone at the front panel, but not the panel
+   itself. Compare the screens and characters logged with the earlier walk.
+10. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
    `SDRAM_INIT_TIMEOUT_MS`; the fault test build (`-DLT_FAULT_TEST=3`) only exercises the no-reply path.
 
 Goal: every PLL inside its range, and memory and core clocks chosen deliberately instead of as 2 x PCLK.
@@ -466,6 +470,48 @@ Goal: make each register access cheap.
   - text mode `03h`
 - **Build option** `LT_BUS_HAL=1` keeps the old path for A/B comparison.
 - **Checks:** `TIMING_PROBE` before and after; a full menu walk.
+
+#### Stage 5 results (2026-10-30)
+
+What was built:
+
+- **Direct registers:** `WriteRegister`, `WriteData`, `ReadStatus` and `ReadData` drive `SPI1->DR` and the CS pin
+  directly, one CS frame per control byte and data byte as before.
+- **SPI clock:** 18 MHz after the PLLs run (`LT_SPI_PRESC`).
+- **Address skipping:** `WriteRegister` only records the register. The address frame goes out with the next data write
+  or read, and only if it differs from the last address sent.
+- **Register cache:** registers only the firmware changes (03h, CCh, CDh, D0h-D7h) are shadowed, and a write of an
+  unchanged value is skipped. This went into the bus layer rather than a separate `lt_draw.c`, so every caller gets it.
+  A reset forgets it all.
+- **Build options:** `-DLT_BUS_HAL=1` restores Ian's functions at 9 MHz, `-DLT_REG_CACHE=0` turns the cache off,
+  `-DLT_SPI_STATS=1` counts frames, and `-DLT_BUS_TEST=1` runs the bench test below. In `LT_REGDUMP` builds the cache
+  is compared with the chip once a second.
+
+Bench:
+
+- **Bus test at 18 MHz:**
+  - 100,000 register write/read-back pairs on D2h, D5h and 63h: 0 errors.
+  - 256 bytes written to SDRAM one byte per frame, and read back: 0 errors.
+  - 256 bytes written as one CS frame (`0x80` followed by all 256 data bytes), and read back: 0 errors.
+  - **So bursts work.** That's the tool for Stage 6 and for glyph loading.
+- **Register cache:** 759 checks against the chip over a minute of live running: 0 mismatches. About 10% of frames are
+  skipped by the cache and address skipping together.
+- **SDRAM soak at 18 MHz:** read straight back after writing, 0 errors; the 10 s and 60 s regions after 3 minutes, 0 bit
+  errors.
+- **Capture:** still 0 short frames and no `?`.
+- **Timing** (`TIMING_PROBE`, 72 MHz CPU, about 40 s of live running each; the block includes the fixed 6 ms wait):
+
+  | Build | Redraw (ms) | Whole timed block, max (ms) |
+  |---|---|---|
+  | `LT_BUS_HAL=1` (9 MHz) | 15.0 | 21.0 |
+  | direct registers, 9 MHz | 7.1 | 13.0 |
+  | direct, 18 MHz, `LT_REG_CACHE=0` | 7.4 | 13.4 |
+  | direct, 18 MHz, cache (Stage 5) | 6.6 | 12.5 |
+
+  The HAL calls were half the redraw. The SPI clock and the cache matter little now: what's left is waiting for the
+  text engine between characters, and the full redraw itself, which is Stage 6's job.
+- **Boot:** init takes 174 ms instead of 416, and the live loop starts at 1.64 s instead of 2.36 s. That's the faster
+  `ClearScreen()`.
 
 ### Stage 6: redraw engine
 
