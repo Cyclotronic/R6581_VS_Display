@@ -261,7 +261,7 @@ The convention used in `Prebuilt/`:
 | `Core/Startup`, `Files/` and `STM32F103C8TX_FLASH.ld` | Startup code and the linker script (64 KB flash at `0x08000000`, 20 KB RAM) |
 | `Drivers/` | CMSIS and the STM32F1 HAL |
 | `VisualGDB/Debug/` | Ian's original build output, including the hex used as the revert target |
-| `Hardware/` | Ian's gerbers for the LT7680 controller board (also the source of the boot-screen character) |
+| `Hardware/` | Ian's gerbers for his host board, which carries the Blue Pill and connects to the LT7680 controller board (BuyDisplay ER-PCBA5981-1, bought with the panel). Also the source of the boot-screen character |
 | `Info/` | Ian's notes: TFT timing presets, VFD packet decode spreadsheets |
 | `Prebuilt/` | Ready-to-flash builds with notes and checksums |
 | `docs/` | These notes and the tools in `docs/tools/` |
