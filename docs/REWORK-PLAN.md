@@ -328,9 +328,9 @@ To run once the panel can be seen. Build: `stage3-O2`, or `stage3-regdump-O2` to
 8. Boot (Stage 3): the panel comes up cleanly with the shorter reset and without the fixed gaps; no flash of garbage.
 9. Menu walk with `menu_logger.py` (Stage 5 asked for it): it needs someone at the front panel, but not the panel
    itself. Compare the screens and characters logged with the earlier walk.
-10. Cold power-up (Stage 7): the wait before the LT7680 set-up is now 20 ms instead of 1 s. Switch the meter off and on
-   ten times: the live display must come up each time, with `lt_init_attempts` 1 and `lt_fault` 0 (`regdump.py`). If
-   it doesn't, build with `-DBOOT_SETTLE_MS=1000`.
+10. ~~Cold power-up (Stage 7)~~: done. The first try showed the PA12 timing-mode problem, which is now fixed (Stage 7
+   results). If a power-up ever leaves the display blank again, read `timingModsOnBoot`, `lt_fault` and
+   `lt_init_attempts` over SWD; `-DBOOT_SETTLE_MS=1000` restores the old wait.
 11. Fault line (Stage 3): the red "LT7680 init fault" line is readable. To force it, build with a short
    `SDRAM_INIT_TIMEOUT_MS`; the fault test build (`-DLT_FAULT_TEST=3`) only exercises the no-reply path.
 
@@ -689,8 +689,16 @@ What's left in the 214 ms:
 The next saving would be to run the LT7680 set-up inside the panel's 120 ms wait, for about 50 ms. It changes the order
 the panel sees its set-up, so it should wait until the panel can be watched.
 
-A warm reset doesn't test a cold power-up, where the supplies are still rising. That check is in the deferred list
-(item 10).
+**Cold power-up:** the first one failed. The display stayed blank because the board was in timing-adjust mode. That
+mode is chosen at start-up when PA12 reads high (DCV held), and on a cold power-up PA12 still reads high for a while,
+before the meter drives its key lines. Ian's start-up read it after about 2.3 s; the trimmed boot read it at about
+50 ms. SWD showed the LT7680 set up cleanly and frames decoding, but `timingModsOnBoot` was 1 and nothing had been
+drawn. The settings page was untouched.
+
+Fix: the live display starts at once, and the main loop reads PA12 at `TIMING_MODE_CHECK_MS` (2,300 ms), where Ian's
+code did. If it's high, the screen clears and timing-adjust mode starts. Confirmed on the bench by power-cycling the
+meter: the display comes up. Holding DCV through power-up to enter timing-adjust mode is still to be checked (deferred
+item 3).
 
 ## Test protocol
 

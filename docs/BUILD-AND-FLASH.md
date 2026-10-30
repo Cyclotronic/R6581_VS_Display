@@ -162,6 +162,7 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | Option | Default | Effect |
 | --- | --- | --- |
 | `BOOT_DIAG_SHOWS=n` | 0 | Number of boots that show the speed test and boot screen (0 = never, 10 = the pre-rework behaviour, 255 = every boot) |
+| `TIMING_MODE_CHECK_MS=n` | 2300 | When PA12 (DCV held at power-up) is read to choose timing-adjust mode. Earlier than about this, a cold power-up reads it high by mistake |
 | `BOOT_SETTLE_MS=n` | 20 | Wait before the LT7680 set-up; Ian had 1000 for no stated reason. The set-up polls and retries, so a short wait is safe on a warm reset; confirm on cold power-ups |
 | `BOOT_SCREEN_MS=n` | 4000 | How long the boot screen stays up |
 | `SPLASH_IN_LOOP=1` | 0 | Ian's splash drawn in the live loop again (untested with the current layout) |

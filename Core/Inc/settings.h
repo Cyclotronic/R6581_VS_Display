@@ -25,6 +25,9 @@
 extern uint8_t boot_diag_number;        // 1-based number of the boot being shown (0 = not shown)
 
 extern _Bool timingModsOnBoot;          // DCV held at power-up: timing-adjust mode instead of the live display
+#ifndef TIMING_MODE_CHECK_MS
+#define TIMING_MODE_CHECK_MS 2300       // when PA12 is read for that (ms after reset): where Ian's start-up read it. Much
+#endif                                  // earlier, on a cold power-up, it reads high before the meter drives its key lines
 
 HAL_StatusTypeDef EEPROM_WriteData(uint32_t address, uint32_t data);
 uint32_t EEPROM_ReadData(uint32_t address);

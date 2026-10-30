@@ -165,13 +165,9 @@ int main(void) {
 
 	ConfigurePWMAndSetBrightness(BACKLIGHTFULL);  // Configure Timer-1 and PWM-1 for backlighting. Settable 0-100%
 
-	// Read pin A12 - Enter timing changes on boot if DCV button held in during power up
-	GPIO_PinState pinA12 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
-	if (pinA12 == GPIO_PIN_SET) {
-		timingModsOnBoot = true;
-	} else {
-		timingModsOnBoot = false;
-	}
+	// DCV held at power-up (timing-adjust mode) is decided in the main loop at TIMING_MODE_CHECK_MS, not here: this early,
+	// on a cold power-up, PA12 still reads high because the meter is not yet driving its key lines.
+	timingModsOnBoot = false;
 
 
 	Settings_Load();				// TFT timing settings from the flash page (defaults written there if invalid)
@@ -210,10 +206,6 @@ int main(void) {
 #if BOOT_DIAG_SHOWS
 	{
 		uint8_t boots = BootCountRead();
-		if (timingModsOnBoot) {          // DCV held at power-up
-			BootCountReset();            // also leaves the TFT timing settings exactly as loaded
-			boots = 0;
-		}
 		if (boots < BOOT_DIAG_SHOWS) {
 			BootCountIncrement(boots);
 			boot_diag_number = boots + 1;
@@ -245,6 +237,7 @@ int main(void) {
 	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 #endif
 	boot_ready_ms = HAL_GetTick();
+	uint8_t timing_mode_checked = 0;
 #if !FULL_REDRAW
 	uint8_t render_tick = 0;			// the 35 ms tick asks for a render (1 V mode and the periodic repaint need no new frame)
 	uint32_t full_redraw_ms = HAL_GetTick();
@@ -298,6 +291,19 @@ int main(void) {
 		}
 #endif
 #endif
+
+		// Timing-adjust mode: DCV held at power-up shows as PA12 high. Read it where Ian's start-up did (about 2.3 s after
+		// power-on); the live display runs until then.
+		if (!timing_mode_checked && HAL_GetTick() >= TIMING_MODE_CHECK_MS) {
+			timing_mode_checked = 1;
+			if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_SET) {
+				timingModsOnBoot = true;
+#if BOOT_DIAG_SHOWS
+				BootCountReset();		// the boot screen comes back for another BOOT_DIAG_SHOWS boots (leaves the timings as loaded)
+#endif
+				ClearScreen();
+			}
+		}
 
 		//*******************************************************************************************
 		// Timed Action - Check if timer flag is set and tasks are ready and run the LCD sub
