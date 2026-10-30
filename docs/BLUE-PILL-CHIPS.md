@@ -65,7 +65,7 @@ board that behaves differently can be described without an ST-Link:
 
 ```
 MCU    CPUID 411FC231  ID 00000000  Flash 64KB  Cycle counter OK
-Panel  ST7701S ID no reply   LT7680 OK, 1 try
+Panel  ST7701S ID FFFFFF  power 9C   LT7680 OK, 1 try
 ```
 
 | Field | Where it comes from | On the bench board |
@@ -74,16 +74,46 @@ Panel  ST7701S ID no reply   LT7680 OK, 1 try
 | `ID` | `DBGMCU_IDCODE`. ST's errata say firmware reads it as 0 on an STM32F103 unless a debugger is attached; a clone that shows a value here behaves differently from ST's part | `20036410` with the ST-Link attached; the page shows what it reads without one |
 | `Flash` | the flash-size word at `0x1FFFF7E0` | `64KB` |
 | `Cycle counter` | the DWT cycle counter: present, enabled, and advancing | `OK` |
-| `ST7701S ID` | the panel's RDID1-3 bytes, read once at boot over the panel's SPI. The data pin is released and read once pulled up and once pulled down | `no reply`: the line reads high whatever the pull, so the panel's data line isn't read back on this board |
+| `ST7701S ID` | the panel's RDID1-3 bytes (`DAh`, `DBh`, `DCh`), read once at boot over the panel's SPI | `FFFFFF`: the module maker left them unprogrammed |
+| `power` | the panel's power-mode register (`0Ah`) from the same read. `9C` = booster on, awake, normal mode, display on. It shows the panel answers and is set up | `9C` |
 | `LT7680` | how the controller's set-up ended: `OK`, or the fault bits (`01` reset, `02` no reply, `04` PLL, `08` SDRAM), and the number of tries | `OK, 1 try` |
+
+If the panel doesn't answer at all, the field reads `no reply`.
 
 **The LT7680 has no ID register.** Every LT768x variant has the same 128 Mb of SDRAM, so memory size doesn't tell
 them apart either. What the page can show is whether the controller answered and set itself up cleanly.
 
-**The panel ID** costs about 0.2 ms at boot. A board whose panel does answer would show its three ID bytes, which
-identify the panel's controller and module maker. On Ian's board the line reads high with either pull, so it shows
-`no reply`; the panel's own data output (SDO) may not be connected. `lcd_id` holds the same value for SWD
-(`0xFFFFFFFF` = no reply).
+**The panel read** costs about 0.2 ms at boot. The data pin (PB5) is released, and each byte is read twice: once with
+the STM32's pull-up and once with its pull-down. If the two differ, nothing drove the line. `lcd_id` and `lcd_pwr` hold
+the same values for SWD (`lcd_id` = `0xFFFFFFFF` if the panel didn't answer).
+
+**The panel's ID bytes don't identify it on this hardware.** The ST7701S datasheet leaves RDID1-3 for the module maker
+to program ("RDID1 ... identifies the LCD module's manufacturer"; default `xxh`). BuyDisplay's ER-TFT4.58-1 leaves them
+at `FF`, and its datasheet gives no values. A panel from another maker may show real bytes. That is the variance this
+line is for.
+
+The path was checked end to end on the bench board, the first time it read `FFFFFF`:
+
+- **At idle, PB5 follows the STM32's own pull** (low with the pull-down, high with the pull-up), so nothing else holds
+  the line.
+- **During the read the panel drives it:** the power-mode byte reads `9C`, the expected value.
+- **The driver board passes the line both ways.** BuyDisplay's ER-PCBA5981-1 lists header pin 18 (`LCD_DIN`) as an input
+  only, and its datasheet has no schematic. But the outline drawing shows no buffer: only the LT7680, a regulator and the
+  flash chip. The LT7680 has no panel-SPI pins of its own.
+
+**What the datasheets let you configure.**
+
+- **ER-TFT4.58-1 panel:** nothing. The interface is fixed at 3-wire SPI plus 18-bit RGB by the ST7701S's `IM[3:0]` pins,
+  which are wired on the panel itself.
+- **ER-PCBA5981-1 driver board:**
+  - J1/J2 choose the backlight control: J1 short and J2 open = an external input (the default), J1 open and J2 short =
+    the LT7680's PWM.
+  - JP1 is the board's flash programming header.
+  - Nothing affects the panel's SPI line.
+
+Datasheets used: [ER-PCBA5981-1](https://www.buydisplay.com/download/manual/ER-PCBA5981-1_Datasheet.pdf) (the LT7680
+controller board), [ER-TFT4.58-1](https://www.buydisplay.com/download/manual/ER-TFT4.58-1_Datasheet.pdf) (the panel),
+and Sitronix's ST7701S datasheet V1.1.
 
 ## Reading a board's identity over SWD
 

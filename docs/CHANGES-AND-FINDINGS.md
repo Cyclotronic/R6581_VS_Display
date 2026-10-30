@@ -38,7 +38,7 @@ still to do are listed there. A guide for reviewing the code is in [REVIEW-GUIDE
 | 6 | Draw only the cells and annunciators that changed, as soon as a frame is stable; rectangle `ClearScreen()` | Everything was redrawn every 35 ms, then a 6 ms wait | Change-to-screen 32.6 to 10.7 ms on average; read-back matches a full redraw pixel for pixel |
 | 7 | Files split by job (see the repository map in [BUILD-AND-FLASH.md](BUILD-AND-FLASH.md)); dead code removed; `DelayMicroseconds()` on the cycle counter; TIM2 flag clear fixed | Readability, and two latent bugs | Same results on the bench as Stage 6 |
 | after 7 | Boot: LT7680 set-up inside the panel's 120 ms wait, faster panel SPI. Capture: every whole frame decoded at once | Fastest start-up; the two-frame rule froze the display at 0.1 PLC and faster | First frame 0.14 s after reset; latency about 1 ms at up to 111 updates a second |
-| after 7 | Timing-adjust page shows the hardware: MCU CPUID, device ID, flash size, cycle counter; panel ID; LT7680 set-up result | Clone Blue Pills and other panels or controllers; the DWT cycle counter is new since Stage 7 | Bench board: genuine STM32F103 (rev X), counter OK, panel `no reply` (its data line isn't read back), LT7680 OK. See [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
+| after 7 | Timing-adjust page shows the hardware: MCU CPUID, device ID, flash size, cycle counter; panel ID; LT7680 set-up result | Clone Blue Pills and other panels or controllers; the DWT cycle counter is new since Stage 7 | Bench board: genuine STM32F103 (rev X), counter OK, panel answers (power byte `9C`) with its ID bytes unprogrammed (`FFFFFF`), LT7680 OK. See [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
 
 ## Test editions (ready-to-flash builds)
 

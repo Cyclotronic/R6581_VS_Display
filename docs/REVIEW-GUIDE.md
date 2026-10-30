@@ -63,7 +63,7 @@ To see the end result against Ian's code file by file, compare `master` with the
 | `82baa04` | Timing-adjust mode chosen at 2.3 s in the main loop, not at start-up (a cold power-up left the display blank) | the `TIMING_MODE_CHECK_MS` block in the main loop | `TIMING_MODE_CHECK_MS` | Stage 7 results, "Cold power-up" |
 | `fdb2383` | Boot in 0.14 s: settings first, LT7680 set-up inside the panel's 120 ms Sleep Out wait, panel SPI at 1 µs. Capture decodes every new whole frame at once | `main()`; `*_Init_Start/_Finish` in `lcd.c`; `Capture_Poll` in `vfd_capture.c`; `Decode_Text`, `Main_Aux_Commit` in `vfd_decode.c` | `LCD_BIT_US=5 LCD_CS_US=10`, `CAPTURE_CONFIRM=1` | [After Stage 7](REWORK-PLAN.md#after-stage-7-boot-capture-rule-and-gpib-tests-2026-10-30) |
 | `08473bd` | Review guide, rework image in `Prebuilt/`, docs brought up to date, two stale comments in `vfd_capture.c` | comments only | | |
-| (next) | Hardware identity on the timing-adjust page: MCU CPUID, device ID, flash size, cycle counter; panel ID bytes; LT7680 set-up result. Notes on clone chips. Image rebuilt | `DrawChipId` in `settings.c`; `LCD_ReadID` in `lcd.c`; its call in `main()` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
+| (next) | Hardware identity on the timing-adjust page: MCU CPUID, device ID, flash size, cycle counter; panel ID and power-mode bytes; LT7680 set-up result. Notes on clone chips. Image rebuilt | `DrawChipId` in `settings.c`; `LCD_ReadID` in `lcd.c`; its call in `main()` | | [BLUE-PILL-CHIPS.md](BLUE-PILL-CHIPS.md) |
 
 ## Where the code is now
 
@@ -116,7 +116,8 @@ These are the places where a mistake would matter most, or where the reasoning i
    then; the block clears the screen and switches mode. Checked on the bench: holding DCV at power-up starts the
    mode and each press steps to the next set.
 9. **The panel ID read at boot** (`LCD_ReadID` in `lcd.c`). It switches the panel's data pin (PB5) to an input for
-   24 clocks and back. Check that the pin is always restored to an output, and that chip select frames each read.
+   each 8-clock reply and back (eight reads, about 0.2 ms). Check that the pin is always restored to an output, and that
+   chip select frames each read.
 10. **The settings page** (`settings.c`). It is the last 1 KB page of flash, `0x0800FC00`. Any erase there must write
    the timing set back; the boot-counter words share the page. Never do a full-chip erase when flashing.
 
@@ -205,7 +206,7 @@ Still to do, from the [deferred visual checks](REWORK-PLAN.md#deferred-visual-ch
 - **Fault line** readable when forced.
 - **Clone chips without DWT** (point 7 above): not tested; no such board here.
 - **The identity lines on the timing-adjust page** with no debugger attached (the device ID should read 0 on ST's
-  chip), and a panel ID from a board whose panel answers (Ian's board reads `no reply`).
+  chip), and a panel ID from a panel whose maker programmed it (the ER-TFT4.58-1 reads `FFFFFF`, unprogrammed).
 
 ## Left as Ian wrote it
 

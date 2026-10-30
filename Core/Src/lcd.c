@@ -92,18 +92,28 @@ static uint32_t LCD_ReadBits(uint8_t cmd, uint8_t bits, uint32_t pull) {
 	return v;
 }
 
-// Panel identity for diagnostics (docs/BLUE-PILL-CHIPS.md): RDID1-3 (DAh, DBh, DCh), one byte each, read once with the
-// pin pulled up and once pulled down. If the two disagree, nothing drove the line; all ones or all zeros means the line is
-// held by something other than the panel. Either way the panel's SDA isn't read back on this board (or the panel doesn't
-// answer), and the result is 0xFFFFFFFF. On the bench board the line reads high with either pull.
+// Panel identity for diagnostics (docs/BLUE-PILL-CHIPS.md). Each byte is read once with the pin pulled up and once pulled
+// down; if the two disagree, nothing drove the line. First RDDPM (0Ah, power mode), whose value is known once the panel is
+// set up (9Ch: booster on, sleep out, normal mode, display on), shows whether the panel answers at all. Then RDID1-3 (DAh,
+// DBh, DCh): one-time-programmable bytes the module maker may have set (unprogrammed they can read FFh).
+// lcd_id = 0x00ID1ID2ID3, or 0xFFFFFFFF if the panel doesn't answer; lcd_pwr = the 0Ah byte (0xFFFF if not driven).
 volatile uint32_t lcd_id = 0;
+volatile uint16_t lcd_pwr = 0;
+static int16_t LCD_ReadByte(uint8_t cmd) {
+	uint8_t up = LCD_ReadBits(cmd, 8, GPIO_PULLUP);
+	uint8_t down = LCD_ReadBits(cmd, 8, GPIO_PULLDOWN);
+	return up == down ? up : -1;
+}
 uint32_t LCD_ReadID(void) {
-	uint32_t up = 0, down = 0;
+	int16_t pwr = LCD_ReadByte(0x0A);
+	lcd_pwr = pwr < 0 ? 0xFFFF : (uint16_t)pwr;
+	uint32_t id = 0;
 	for (uint8_t c = 0xDA; c <= 0xDC; c++) {
-		up = (up << 8) | LCD_ReadBits(c, 8, GPIO_PULLUP);
-		down = (down << 8) | LCD_ReadBits(c, 8, GPIO_PULLDOWN);
+		int16_t b = LCD_ReadByte(c);
+		if (b < 0) { id = 0xFFFFFFFFu; break; }
+		id = (id << 8) | (uint8_t)b;
 	}
-	lcd_id = (up == down && up != 0x00FFFFFFu && up != 0) ? up : 0xFFFFFFFFu;
+	lcd_id = (pwr < 0 || pwr == 0xFF || pwr == 0x00) ? 0xFFFFFFFFu : id;
 	return lcd_id;
 }
 

@@ -27,8 +27,9 @@ void AdaFruit_Init_Start(void);
 void AdaFruit_Init_Finish(void);
 void BuyDisplay_Init_Start(void);
 void BuyDisplay_Init_Finish(void);
-uint32_t LCD_ReadID(void);			// ST7701S RDID1-3 as 0x00ID1ID2ID3; 0xFFFFFFFF if the panel doesn't answer
+uint32_t LCD_ReadID(void);			// ST7701S RDID1-3 as 0x00ID1ID2ID3 (FF = not programmed); 0xFFFFFFFF if the panel does not answer
 extern volatile uint32_t lcd_id;	// the last LCD_ReadID() result (read once at boot)
+extern volatile uint16_t lcd_pwr;	// the panel's power-mode byte (0Ah) from the same read; 0xFFFF if not driven
 
 #endif // LCD_H
 

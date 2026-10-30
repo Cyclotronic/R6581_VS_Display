@@ -243,7 +243,7 @@ void Settings_Load(void) {
 // Two lines on the timing-adjust page identifying the hardware, for diagnosing boards that differ (docs/BLUE-PILL-CHIPS.md):
 // the Blue Pill's core CPUID (0x411FC231 on ST's STM32F103), its device ID register (reads 0 on ST's STM32F103 without a
 // debugger attached, an ST erratum), flash size, and whether the DWT cycle counter that DelayMicroseconds() relies on runs;
-// then the panel's ST7701S ID bytes (read at boot) and how the LT7680 set-up went. The LT7680 has no ID register.
+// then the panel's ST7701S ID bytes and power-mode byte (read at boot) and how the LT7680 set-up went. The LT7680 has no ID register.
 static void DrawIdLine(uint16_t x, const char* s) {
 	SetTextColors(0x00FFFF, 0x000000); // Foreground: cyan, Background: Black
 	ConfigureFontAndPosition(
@@ -264,7 +264,7 @@ static void DrawIdLine(uint16_t x, const char* s) {
 }
 
 static void DrawChipId(void) {
-	char line[80];
+	char line[100];
 	uint32_t c0 = DWT->CYCCNT;
 	uint8_t cyc_ok = !(DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) && (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) && DWT->CYCCNT != c0;
 
@@ -273,9 +273,9 @@ static void DrawChipId(void) {
 		cyc_ok ? "OK" : "MISSING");
 	DrawIdLine(340, line);
 
-	char panel[16], lt[24];
+	char panel[24], lt[24];
 	if (lcd_id == 0xFFFFFFFFu) strcpy(panel, "no reply");
-	else snprintf(panel, sizeof(panel), "%06lX", (unsigned long)lcd_id);
+	else snprintf(panel, sizeof(panel), "%06lX  power %02X", (unsigned long)lcd_id, lcd_pwr & 0xFF);
 	if (lt_fault) snprintf(lt, sizeof(lt), "fault %02X", lt_fault);
 	else strcpy(lt, "OK");
 	snprintf(line, sizeof(line), "Panel  ST7701S ID %s   LT7680 %s, %u %s", panel, lt, lt_init_attempts,
