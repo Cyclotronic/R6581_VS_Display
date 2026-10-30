@@ -94,8 +94,8 @@ warnings that remain are in Ian's code and harmless.
 
 | Build | text | data | bss |
 | --- | ---: | ---: | ---: |
-| `-O0` | 36,992 | 160 | 4,640 |
-| `-O2` | 28,732 | 160 | 4,648 |
+| `-O0` | 37,332 | 160 | 4,640 |
+| `-O2` | 29,060 | 160 | 4,656 |
 
 **Flash budget:** the linker script gives 64 KB at `0x08000000`, but the **last 1 KB page (`0x0800FC00`) belongs to the settings**, so code and data must stay
 below 63 KB (64,512 bytes). There is about 26 KB of headroom at `-O0`. If a build grows past it, the link may still succeed and then overwrite the settings page on flashing. Check the size line.
