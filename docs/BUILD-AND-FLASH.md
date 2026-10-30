@@ -168,6 +168,8 @@ Read it without halting: `-c "init" -c "mdw 0x0800FC00 8" -c "mdw 0x0800FC40 16"
 | `TIMING_PROBE=1` | 0 | Keeps cycle-count timing variables (`tp_*`) readable over SWD; see [TIMING-EXPERIMENTS.md](TIMING-EXPERIMENTS.md) |
 | `SDRAM_INIT_LEGACY=1` | 0 | Ian's original SDRAM set-up, which leaves auto-refresh disabled and the SDRAM timing registers wrong; only for A/B comparison. See Stage 1 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `SDRAM_SOAK=1` | 0 | Writes test patterns to unused SDRAM and reads them back on a schedule, counting bit errors; read with `tools/soak.py`. A non-visual check that the display memory holds its data |
+| `LT_MCLK_MHZ`, `LT_CCLK_MHZ` | 100, 100 | LT7680 memory and core clocks. They are no longer 2 x the pixel clock; the datasheet rules (CCLK x 2 >= MCLK >= CCLK, CCLK >= 1.5 x PCLK) are enforced. The SDRAM refresh and backlight PWM follow automatically |
+| `LT_CLOCKS_LEGACY=1` | 0 | Ian's clocks (MCLK = CCLK = 2 x PCLK, PCLK PLL VCO below its 100 MHz minimum); only for A/B comparison. See Stage 2 in [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `LT_REGDUMP=1` | 0 | Reads the LT7680 PLL, panel and SDRAM registers (both SDRAM register banks) into `lt_regdump[]` after init, and again on request; decode with `tools/regdump.py`. Stage 0 of [REWORK-PLAN.md](REWORK-PLAN.md) |
 | `OPT=0/2/s` (environment, not a -D) | 0 | Optimisation level |
 

@@ -848,6 +848,56 @@ void FillScreen(uint32_t color) {
 //**************************************************************************************************
 // Subs to run and sent to the LT7680 - Translated from Levetop sample info
 
+uint16_t lt_cclk_mhz = 0;               // core clock set by LT7680_PLL_Initial_LT() (backlight PWM timing)
+uint32_t lt_pclk_khz = 0;               // pixel clock set by LT7680_PLL_Initial_LT()
+
+#if !LT_CLOCKS_LEGACY
+// Program one PLL (REG[c1] = OD/R/N[8], REG[c1 + 1] = N[7:0]) as close as possible to target_khz, keeping the VCO
+// (XI * N / R) inside 100-500 MHz (datasheet V4.1, PLL electrical characteristics). R = 5 gives a 2 MHz loop input;
+// the output divider is /4 (as in the datasheet's examples), which puts every output from 25 to 125 MHz well inside
+// the VCO range (e.g. PCLK 29 MHz -> VCO 116 MHz, 100 MHz -> 400 MHz); /2 or /1 only above that. Returns the real output in kHz.
+static uint32_t SetPLL_LT(uint8_t c1, uint32_t target_khz) {
+    static const uint8_t od_code[3] = { 3, 1, 0 }, od_div[3] = { 4, 2, 1 };
+    const uint32_t r = 5, in_khz = (LT_XI_MHZ * 1000u) / r;
+    uint8_t k = 0;
+    uint32_t n;
+    while (k < 2 && target_khz * od_div[k] > 500000u) k++;
+    n = (target_khz * od_div[k] + in_khz / 2) / in_khz;
+    if (n < 2) n = 2;
+    if (n > 511) n = 511;
+    while (n > 2 && in_khz * n > 500000u) n--;
+    WriteRegister(c1);     WriteData((uint8_t)((od_code[k] << 6) | (r << 1) | ((n >> 8) & 1)));
+    WriteRegister(c1 + 1); WriteData((uint8_t)(n & 0xFF));
+    return (in_khz * n) / od_div[k];
+}
+
+// Register 0x05-0x0A, 0x00. Stage 2 of docs/REWORK-PLAN.md: PCLK from the panel timings, MCLK and CCLK fixed
+// (LT_MCLK_MHZ, LT_CCLK_MHZ) instead of 2 x PCLK, every VCO in range. Datasheet rules: CCLK x 2 >= MCLK >= CCLK,
+// CCLK >= 1.5 x PCLK; limits PCLK SCLK_MAX, MCLK 133, CCLK 100 MHz.
+void LT7680_PLL_Initial_LT() {
+    uint32_t pclk_khz = ((LCD_HBPD + LCD_HFPD + LCD_HSPW + LCD_XSIZE_TFT) *
+        (LCD_VBPD + LCD_VFPD + LCD_VSPW + LCD_YSIZE_TFT) * REFRESH_RATE + 500u) / 1000u;
+    uint32_t cclk = LT_CCLK_MHZ, mclk = LT_MCLK_MHZ;
+
+    if (pclk_khz > SCLK_MAX * 1000u) pclk_khz = SCLK_MAX * 1000u;
+    if (cclk > CCLK_MAX) cclk = CCLK_MAX;
+    if (cclk * 2000u < pclk_khz * 3u) cclk = (pclk_khz * 3u + 1999u) / 2000u;   // CCLK >= 1.5 x PCLK
+    if (mclk > 133u) mclk = 133u;
+    if (mclk < cclk) mclk = cclk;                                              // MCLK >= CCLK
+    if (mclk > cclk * 2u) mclk = cclk * 2u;                                    // MCLK <= 2 x CCLK
+
+    lt_pclk_khz = SetPLL_LT(0x05, pclk_khz);
+    lt_mclk_mhz = (uint16_t)(SetPLL_LT(0x07, mclk * 1000u) / 1000u);
+    lt_cclk_mhz = (uint16_t)(SetPLL_LT(0x09, cclk * 1000u) / 1000u);
+
+    WriteRegister(0x00);                // reconfigure the PLLs
+    WriteData(0x80);
+    HAL_Delay(10);
+}
+
+#else
+// Ian's original clocks (build with -DLT_CLOCKS_LEGACY=1): MCLK = CCLK = 2 x PCLK, OD = /2 for all three, which leaves
+// the PCLK VCO below its 100 MHz minimum.
 // Register 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x00
 void LT7680_PLL_Initial_LT() {
     // Parameters
@@ -899,8 +949,10 @@ void LT7680_PLL_Initial_LT() {
     WriteData(lpllN_cclk & 0xFF);                                                       // 36
     //WriteData(0x56);          // test
 
-    // Remember the memory clock actually programmed: Fout = XI * N / (R * OD), OD code 2 = divide by 2
+    // Remember the clocks actually programmed: Fout = XI * N / (R * OD), OD code 2 = divide by 2
     lt_mclk_mhz = (uint16_t)((LT_XI_MHZ * lpllN_mclk) / (lpllR_mclk * 2u));
+    lt_cclk_mhz = (uint16_t)((LT_XI_MHZ * lpllN_cclk) / (lpllR_cclk * 2u));
+    lt_pclk_khz = (LT_XI_MHZ * 1000u * lpllN_sclk) / (lpllR_sclk * 2u);
 
     // Trigger PLL reconfiguration (Register 0x00)
     WriteRegister(0x00);
@@ -909,6 +961,7 @@ void LT7680_PLL_Initial_LT() {
     // Add delay to allow PLL settings to stabilize
     HAL_Delay(10); // delay
 }
+#endif // LT_CLOCKS_LEGACY
 
 
 // Register 0x10, 0x11, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35
@@ -1331,8 +1384,15 @@ void ConfigurePWMAndSetBrightness(uint8_t brightnessPercentage) {
     // Step 1: Set the Prescaler (REG[84h])
     // Core Frequency: 54MHz -> Base Frequency = Core_Freq / (Prescaler + 1)
     // Example: Prescaler = 16 -> Base Frequency = 54MHz / (16 + 1) = ~3.18MHz
+    // Prescaler from the real core clock so the PWM stays near LT_BL_PWM_HZ (Ian's 0x10 at 58 MHz): CCLK / (P + 1) / 4 / 256
+    uint32_t presc = 0x10;
+    if (lt_cclk_mhz) {
+        presc = (lt_cclk_mhz * 1000000u) / (LT_BL_PWM_HZ * 4u * 256u);
+        presc = presc ? presc - 1u : 0u;
+        if (presc > 0xFF) presc = 0xFF;
+    }
     WriteRegister(0x84);
-    WriteData(0x10); // Prescaler = 16
+    WriteData((uint8_t)presc);
 
     // Step 2: Configure PWM Clock Mux Register (REG[85h])
     // Timer-1 divisor = 1/4, PWM[1] = Timer-1 events

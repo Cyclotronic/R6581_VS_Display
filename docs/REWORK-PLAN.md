@@ -4,11 +4,13 @@ A staged plan for reworking the display firmware: what is wrong, what to keep, a
 is small enough to build, flash and check on the bench before the next one starts, and each can be turned off at build time
 until it has proved itself. Register references are to the LT768x datasheet V4.1 in `reference/lt7680/`.
 
-Status (2026-10-29):
+Status (2026-10-30):
 
 - **Stage 0 done:** the register dump on the bench confirms the SDRAM findings ([results](#stage-0-results-2026-10-29)).
-- **Stage 1 built and flashed:** registers verified on the bench. The DISPLAY OFF soak hasn't been run yet. Branch
-  `rework/stage1-sdram`.
+- **Stage 1 done:** registers verified, and the SDRAM retention soak shows no bit loss where the current build loses up to
+  3% of bits in 10 minutes ([soak results](#sdram-retention-soak-2026-10-30)).
+- **Stage 2 done:** clocks verified in range, soak clean at 100 MHz.
+- **Visual checks deferred:** no way to see the panel yet ([list](#deferred-visual-checks)).
 - Later stages not started.
 
 ## Contents
@@ -228,7 +230,32 @@ SMPL/AUTO/AZERO/FRONT, no unmatched characters.
   calls it again after reprogramming the PLL.
 - The ready-wait checks both `E4h` bit 0 and status bit 2, with a 100 ms timeout counted in `lt_sdram_init_timeouts`.
 - `-DSDRAM_INIT_LEGACY=1` builds Ian's sequence.
-- The register checks above pass. The soak and menu-walk checks below are still to do.
+- The register checks above pass, and so does the retention soak below. The visual checks are deferred.
+
+#### SDRAM retention soak (2026-10-30)
+
+There's no way to see the panel yet, so the corruption is measured directly instead (`-DSDRAM_SOAK=1`,
+`tools/soak.py`):
+
+- The firmware writes a fixed pseudo-random pattern of 1,024 bytes (8,192 bits) into each of 4 areas of SDRAM at
+  `0x300000` + n x 64 KB. The panel never scans those areas, just like the glyph store.
+- It reads each area back on its own schedule and counts wrong bits. Reading a row also refreshes it, which is why each
+  area has a different interval.
+- Each pattern is read straight back after writing. That gave 0 errors in every run, and the first bytes matched the
+  expected pattern, so the read path itself is correct.
+
+Each build ran for 11 minutes on the same board, with the meter on 100 mV DC. Figures are the most bits wrong at any
+read:
+
+| Build | read every 10 s | every 60 s | every 10 min | not read for 10-11 min |
+| --- | --- | --- | --- | --- |
+| `soak-legacy-O2`: Ian's SDRAM init (the current build) | 0 | **9** | **243** | **280** |
+| `stage1-soak-regdump-O2`: Stage 1 | 0 | 0 | 0 | 0 |
+| `stage2-soak-regdump-O2`: Stage 1 + Stage 2 clocks (MCLK = CCLK = 100 MHz, refresh 1,500) | 0 | 0 | 0 | 0 |
+
+With refresh off, a row that isn't read loses bits within a minute, and about 3% of them within 10 minutes. That is
+the corruption of the glyph store, and of the whole display buffer during DISPLAY OFF. With Stage 1 nothing is lost.
+Logs and register dumps are in `captures/soak/` (project folder).
 
 
 Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and the most likely cure for the corruption.
@@ -252,6 +279,38 @@ Goal: refresh on, timings sane, the correct memory layout. Small, isolated, and 
   should no longer be needed. Keep it until a soak test proves that.
 
 ### Stage 2: clocks
+
+**Built** on `rework/stage2-clocks`:
+- `SetPLL_LT()` programs each PLL with R = 5 and OD = /4, so the VCO is 4 x the output. Examples: PCLK 29 MHz gives a
+  116 MHz VCO, and 100 MHz gives 400 MHz.
+- PCLK follows the panel timings in 0.5 MHz steps.
+- MCLK and CCLK are `LT_MCLK_MHZ` and `LT_CCLK_MHZ` (default 100 / 100), with the datasheet rules enforced.
+- `lt_cclk_mhz` and `lt_pclk_khz` record the clocks actually programmed.
+- The backlight PWM prescaler is calculated from CCLK so the PWM stays about 3.3 kHz.
+- Timing-adjust mode keeps the boot count across its settings-page erase.
+- `-DLT_CLOCKS_LEGACY=1` restores Ian's clocks.
+
+**Bench (2026-10-30):**
+- PCLK 29.0 MHz (VCO 116), MCLK 100.0 MHz (VCO 400), CCLK 100.0 MHz (VCO 400).
+- Refresh 1,500 clocks = 15.0 us.
+- Timing bank at its reset values.
+- SDRAM retention soak clean (table above).
+- The meter decodes normally.
+- The visual checks (flicker, colours, backlight at the new PWM prescaler, all 6 timing sets) are deferred.
+
+#### Deferred visual checks
+
+To run once the panel can be seen. Build: `stage2-O2`, or `stage2-soak-regdump-O2` to also read the soak.
+
+1. Panel is stable, with no flicker or colour faults. In particular, check the pixel clock: its frequency is unchanged,
+   but its PLL now runs inside the VCO range.
+2. Backlight brightness and no visible PWM beat. The prescaler went from 16 to 28 to keep about 3.3 kHz at the 100 MHz
+   core clock.
+3. Timing-adjust mode (hold DCV at power-up): step through all 6 sets, and check the boot count survives.
+4. DISPLAY OFF for 60 minutes, then on: the whole panel is clean, including the left edge and the gaps between rows.
+5. Ohms screen after an hour on another screen: the ohm glyph is intact.
+6. Whether the right-edge wipe is still needed (Stage 6).
+7. Glyph self-test pages and a menu walk, compared with the photos of the current build.
 
 Goal: every PLL inside its range, and memory and core clocks chosen deliberately instead of as 2 x PCLK.
 

@@ -150,6 +150,20 @@ extern uint32_t REFRESH_RATE;
 #define MCLK_MAX				100			// Max allowable	100
 #define CCLK_MAX				100			// Max allowable	100
 #define LT_XI_MHZ				10u			// LT7680 crystal (XI)
+// Clocks (Stage 2 of docs/REWORK-PLAN.md): memory and core clocks fixed instead of 2 x PCLK. LT_CLOCKS_LEGACY=1 restores
+// Ian's clocks (MCLK = CCLK = 2 x PCLK, PCLK VCO below its 100 MHz minimum) for A/B comparison.
+#ifndef LT_CLOCKS_LEGACY
+#define LT_CLOCKS_LEGACY		0
+#endif
+#ifndef LT_MCLK_MHZ
+#define LT_MCLK_MHZ				100u		// SDRAM clock (max 133)
+#endif
+#ifndef LT_CCLK_MHZ
+#define LT_CCLK_MHZ				100u		// core clock: text, BTE and drawing engines (max 100)
+#endif
+#define LT_BL_PWM_HZ			3300u		// backlight PWM frequency (Ian's setting gave ~3.3 kHz at a 58 MHz core clock)
+extern uint16_t lt_cclk_mhz;
+extern uint32_t lt_pclk_khz;
 // SDRAM set-up (Stage 1 of docs/REWORK-PLAN.md). SDRAM_INIT_LEGACY=1 restores Ian's sequence, which writes E0h-E3h
 // into the timing-parameter bank and leaves auto-refresh disabled; kept only for A/B comparison.
 #ifndef SDRAM_INIT_LEGACY

@@ -926,7 +926,9 @@ int main(void) {
 							//HAL_Delay(5);
 							Delay_NonBlocking(5);  // Wait ms in a non-blocking way
 
+							uint8_t bootsKept = BootCountRead();	// the page erase below also clears the boot counter
 							EEPROM_ErasePage(EEPROM_START_ADDRESS) == HAL_OK;		// Erase Flash
+							for (uint8_t b = 0; b < bootsKept; b++) BootCountIncrement(b);
 
 							// Save the updated settings to flash
 							EEPROM_WriteData(EEPROM_START_ADDRESS, setting_LCD_VBPD);
